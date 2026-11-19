@@ -88,8 +88,23 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
       // Retina: the guest must render at device pixels or the browser upscales a
       // 1x bitmap. Zooming the guest page out by the device pixel ratio makes
       // noVNC ask for a 2x desktop, which is then shown downscaled (still sharp).
-      const zoom = (frame as unknown as { setZoomFactor?: (z: number) => void });
-      zoom.setZoomFactor?.(1 / Math.max(1, window.devicePixelRatio || 1));
+      // setZoomFactor only works after dom-ready; zooming the guest page out by the
+      // device pixel ratio makes noVNC ask for a 2x desktop, which stays sharp when
+      // the browser downsamples it for a Retina panel.
+      let zoomed = false;
+      frame.addEventListener('dom-ready', () => {
+        if (zoomed) return;
+        zoomed = true;
+        const ratio = Math.max(1, window.devicePixelRatio || 1);
+        if (ratio > 1) {
+          try {
+            (frame as unknown as { setZoomFactor?: (z: number) => void }).setZoomFactor?.(1 / ratio);
+            (frame as unknown as { reload?: () => void }).reload?.();
+          } catch {
+            /* zoom is cosmetic; never block the pane on it */
+          }
+        }
+      });
       frame.src = src;
     } catch (error) {
       if (seq !== loadSeq) return;

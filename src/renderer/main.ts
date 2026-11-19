@@ -232,13 +232,25 @@ function mountShell(): void {
       sessList.replaceChildren();
     }
   };
-  el(root, '#sess-refresh').addEventListener('click', () => void refreshSessions());
+  refreshSessionList = refreshSessions;
+  el(root, '#sess-refresh').addEventListener('click', () => void newTerminal());
   void refreshSessions();
   window.setInterval(() => void refreshSessions(), 20_000);
 
   el(root, '#project-trash').addEventListener('click', () => {
     window.confirm(`删除项目「${nameEl.textContent ?? ''}」？`);
   });
+}
+
+let refreshSessionList: () => Promise<void> = async () => {};
+
+async function newTerminal(session?: string): Promise<void> {
+  setView('ssh');
+  // setView only creates the pane; a new tab needs an explicit open, otherwise
+  // the button just re-focuses whatever terminal was already there.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  if (term) await term.open(session);
+  void refreshSessionList();
 }
 
 function setView(next: View): void {
@@ -354,7 +366,7 @@ function renderWorkbench(): void {
       <p class="wb-hint">打开终端后输入 claude 开始工作。所有流量只经过所选节点，不提供直连开关。</p>
     </div>`;
 
-  viewEls.workbench.querySelector('#wb-new-term')?.addEventListener('click', () => setView('ssh'));
+  viewEls.workbench.querySelector('#wb-new-term')?.addEventListener('click', () => void newTerminal());
   viewEls.workbench.querySelector('#wb-browser')?.addEventListener('click', () => setView('browser'));
   viewEls.workbench.querySelector('#wb-check')?.addEventListener('click', () => void runCheck());
 }

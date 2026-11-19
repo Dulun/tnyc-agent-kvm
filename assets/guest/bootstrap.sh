@@ -87,6 +87,7 @@ exec google-chrome \
   --no-first-run \
   --no-default-browser-check \
   --start-maximized \
+  --force-device-scale-factor=2 \
   about:blank
 EOF
 chmod 0755 /usr/local/bin/cage-browser-start
