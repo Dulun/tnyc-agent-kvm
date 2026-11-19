@@ -230,7 +230,14 @@ function setView(next: View): void {
     viewEls?.settings.replaceChildren();
   }
   if (next === 'workbench') renderWorkbench();
-  if (next === 'ssh') requestAnimationFrame(() => term?.fitNow());
+  if (next === 'ssh') {
+    // The pane was display:none while the terminal was created, so fit once the
+    // layout settles (and again after fonts/scrollbars change the cell size).
+    const fit = (): void => term?.fitNow();
+    requestAnimationFrame(fit);
+    setTimeout(fit, 120);
+    setTimeout(fit, 400);
+  }
   paint();
 }
 

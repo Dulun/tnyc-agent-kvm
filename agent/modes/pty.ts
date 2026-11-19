@@ -17,8 +17,9 @@ export interface PtyOptions {
 }
 
 export function runPty(opts: PtyOptions): Promise<void> {
+  // The app renders its own tab strip, so the tmux status line is noise.
   const remote = opts.session
-    ? `tmux new-session -A -s ${sq(opts.session)} -x ${opts.cols} -y ${opts.rows}`
+    ? `tmux set-option -g status off 2>/dev/null; tmux new-session -A -s ${sq(opts.session)} -x ${opts.cols} -y ${opts.rows}`
     : 'exec bash -l';
   const child = spawn('ssh', [...SSH_OPTS, '-tt', '-J', GATEWAY, CAGE, `env TERM=xterm-256color LC_ALL=C.UTF-8 ${remote}`], {
     stdio: ['pipe', 'inherit', 'inherit'],
