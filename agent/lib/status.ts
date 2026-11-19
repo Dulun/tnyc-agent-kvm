@@ -225,27 +225,46 @@ export async function instanceList(): Promise<Instance[]> {
   }));
 }
 
-/** Power one VM on its own, without touching the other. */
-export async function vmPower(target: 'cage' | 'gateway', action: 'start' | 'stop'): Promise<void> {
-  const rec = await findInstance();
-  const name = target === 'gateway' ? (rec?.gatewayName ?? 'gateway-kvm') : (rec?.name ?? (await instanceList())[0]?.name);
-  if (!name) throw new AgentError(ERR.missing, 'no instance provisioned on this host');
+async function startVm(name: string): Promise<void> {
   const current = (await virsh(['domstate', name], { timeoutMs: 10_000 })).stdout.trim();
-  if (action === 'start') {
-    if (current === 'running') return;
-    const res = await virsh(['start', name], { timeoutMs: 60_000 });
-    if (res.code !== 0 && !/already active/i.test(res.stderr)) {
-      throw new AgentError(ERR.generic, `virsh start ${name}: ${tail(res.stderr, 4)}`);
-    }
-    if (!(await waitForVmState(name, 'running', 180_000))) throw new AgentError(ERR.timeout, `${name} did not start`);
-    if (target === 'gateway') await waitForGateway().catch(() => undefined);
-    return;
+  if (current === 'running') return;
+  const res = await virsh(['start', name], { timeoutMs: 60_000 });
+  if (res.code !== 0 && !/already active/i.test(res.stderr)) {
+    throw new AgentError(ERR.generic, `virsh start ${name}: ${tail(res.stderr, 4)}`);
   }
+  if (!(await waitForVmState(name, 'running', 180_000))) throw new AgentError(ERR.timeout, `${name} did not start`);
+}
+
+async function stopVm(name: string): Promise<void> {
+  const current = (await virsh(['domstate', name], { timeoutMs: 10_000 })).stdout.trim();
   if (current === 'shut off') return;
   await virsh(['shutdown', name], { timeoutMs: 60_000 });
   if (await waitForVmState(name, 'shut off', 90_000)) return;
   await virsh(['destroy', name], { timeoutMs: 30_000 });
   if (!(await waitForVmState(name, 'shut off', 15_000))) throw new AgentError(ERR.timeout, `${name} did not stop`);
+}
+
+/**
+ * Power one VM, honouring the boot order: the Clash gateway comes up first and
+ * goes down last, so the cage never runs with no way out (and never outlives it).
+ */
+export async function vmPower(target: 'cage' | 'gateway', action: 'start' | 'stop'): Promise<void> {
+  const rec = await findInstance();
+  const cageName = rec?.name ?? (await instanceList())[0]?.name;
+  const gwName = rec?.gatewayName ?? 'gateway-kvm';
+  if (!cageName) throw new AgentError(ERR.missing, 'no instance provisioned on this host');
+  const name = target === 'gateway' ? gwName : cageName;
+  if (action === 'start') {
+    if (target === 'cage') {
+      await startVm(gwName);
+      await waitForGateway().catch(() => undefined);
+    }
+    await startVm(name);
+    if (target === 'gateway') await waitForGateway().catch(() => undefined);
+    return;
+  }
+  if (target === 'gateway' && cageName !== gwName) await stopVm(cageName);
+  await stopVm(name);
 }
 
 export async function findInstance(id?: string): Promise<InstanceRecord | null> {

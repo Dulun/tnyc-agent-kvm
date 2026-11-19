@@ -478,13 +478,15 @@ function renderWorkbench(): void {
         <div class="wb-row">
           <span class="wb-icon">${icon('shield', 18)}</span>
           <span class="wb-row-text"><b>隔离环境</b><small>${running ? '运行中' : '已停止'}</small></span>
-          <button type="button" class="ghost" id="wb-cage-power" ${powerBusy ? 'disabled' : ''}>${running ? '关机' : '开机'}</button>
+          <button type="button" class="ghost" id="wb-cage-on" ${powerBusy || running ? 'disabled' : ''}>开机</button>
+          <button type="button" class="ghost" id="wb-cage-off" ${powerBusy || !running ? 'disabled' : ''}>关机</button>
         </div>
         <div class="wb-row">
           <span class="dot ${gatewayRunning ? 'ok' : 'bad'}"></span>
           <span class="wb-row-text"><b>出口网关 · Clash</b><small>${instance?.gatewayName ?? 'gateway-kvm'} · ${gatewayRunning ? '运行中' : '已停止'}</small></span>
           <button type="button" class="ghost" id="wb-gw-core" ${powerBusy || !gatewayRunning ? 'disabled' : ''}>重启内核</button>
-          <button type="button" class="ghost" id="wb-gw-power" ${powerBusy ? 'disabled' : ''}>${gatewayRunning ? '关机' : '开机'}</button>
+          <button type="button" class="ghost" id="wb-gw-on" ${powerBusy || gatewayRunning ? 'disabled' : ''}>开机</button>
+          <button type="button" class="ghost" id="wb-gw-off" ${powerBusy || !gatewayRunning ? 'disabled' : ''}>关机</button>
         </div>
         <div class="wb-row">
           <span class="dot ${pass ? 'ok' : 'bad'}"></span>
@@ -492,6 +494,14 @@ function renderWorkbench(): void {
           <button type="button" class="primary" id="wb-new-term">新建终端</button>
         </div>
       </div>
+      ${!instance ? `<div class="card wb-card" id="wb-create">
+        <div class="wb-row"><span class="wb-icon">${icon('shield', 18)}</span><span class="wb-row-text"><b>创建环境</b><small>KVM 尚未创建</small></span></div>
+        <div class="wb-row"><input id="cr-image" placeholder="镜像路径，例 /var/lib/libvirt/images/focal.qcow2" value="${esc(lastImagePath)}"></div>
+        <div class="wb-row"><input id="cr-vcpus" type="number" min="1" value="4"><input id="cr-mem" type="number" min="1024" step="1024" value="8192"></div>
+        <div class="wb-row"><input id="cr-server" placeholder="节点地址"><input id="cr-port" type="number" value="443" placeholder="端口"></div>
+        <div class="wb-row"><input id="cr-password" type="password" placeholder="节点密码"><input id="cr-sni" placeholder="SNI（可选）"></div>
+        <div class="wb-row"><span class="wb-row-text"><small id="cr-state">${esc(provisionStep)}</small></span><button type="button" class="primary" id="cr-go" ${provisionBusy ? 'disabled' : ''}>创建</button></div>
+      </div>` : ''}
       <div class="wb-actions">
         <button type="button" class="ghost" id="wb-check" ${checking ? 'disabled' : ''}>${checking ? '检查中…' : '运行泄漏检查'}</button>
         <button type="button" class="ghost" id="wb-browser">打开浏览器</button>
@@ -503,9 +513,12 @@ function renderWorkbench(): void {
   viewEls.workbench.querySelector('#wb-new-term')?.addEventListener('click', () => void newTerminal());
   viewEls.workbench.querySelector('#wb-browser')?.addEventListener('click', () => setView('browser'));
   viewEls.workbench.querySelector('#wb-check')?.addEventListener('click', () => void runCheck());
-  viewEls.workbench.querySelector('#wb-cage-power')?.addEventListener('click', () => void runVmPower('cage', running ? 'stop' : 'start'));
-  viewEls.workbench.querySelector('#wb-gw-power')?.addEventListener('click', () => void runVmPower('gateway', gatewayRunning ? 'stop' : 'start'));
+  viewEls.workbench.querySelector('#wb-cage-on')?.addEventListener('click', () => void runVmPower('cage', 'start'));
+  viewEls.workbench.querySelector('#wb-cage-off')?.addEventListener('click', () => void runVmPower('cage', 'stop'));
+  viewEls.workbench.querySelector('#wb-gw-on')?.addEventListener('click', () => void runVmPower('gateway', 'start'));
+  viewEls.workbench.querySelector('#wb-gw-off')?.addEventListener('click', () => void runVmPower('gateway', 'stop'));
   viewEls.workbench.querySelector('#wb-gw-core')?.addEventListener('click', () => void runCoreRestart());
+  viewEls.workbench.querySelector('#cr-go')?.addEventListener('click', () => void runCreate());
 }
 
 function openSettingsView(): void {
@@ -566,12 +579,46 @@ async function runCheck(): Promise<void> {
 }
 
 let powerBusy = false;
+let provisionBusy = false;
+let provisionStep = '';
+let lastImagePath = '';
+
+async function runCreate(): Promise<void> {
+  if (!api || provisionBusy) return;
+  const q = (id: string): string => (document.querySelector(id) as HTMLInputElement | null)?.value.trim() ?? '';
+  const imagePath = q('#cr-image');
+  const server = q('#cr-server');
+  const port = Number(q('#cr-port') || '443');
+  const password = q('#cr-password');
+  if (!imagePath || !server || !password) { errorMessage = '镜像路径、节点地址、节点密码都必须填写'; paint(); return; }
+  lastImagePath = imagePath;
+  provisionBusy = true;
+  provisionStep = '检查中…';
+  renderWorkbench();
+  try {
+    const plan = await api.provisionPlan({ imagePath, vcpus: Number(q('#cr-vcpus') || '4'), memMb: Number(q('#cr-mem') || '8192') });
+    for (const w of plan.warnings ?? []) if (!window.confirm(`${w}\n\n继续创建？`)) { provisionBusy = false; provisionStep = ''; renderWorkbench(); return; }
+    await api.provisionRun({
+      imagePath,
+      vcpus: Number(q('#cr-vcpus') || '4'),
+      memMb: Number(q('#cr-mem') || '8192'),
+      node: { name: 'node', type: 'hysteria2', server, port, password, sni: q('#cr-sni') || undefined },
+    });
+    provisionStep = '创建完成';
+  } catch (failure) {
+    errorMessage = messageOf(failure);
+    provisionStep = `创建失败：${messageOf(failure)}`;
+  } finally {
+    provisionBusy = false;
+    await refresh();
+  }
+}
 
 async function runVmPower(target: 'cage' | 'gateway', action: 'start' | 'stop'): Promise<void> {
   if (!api || powerBusy) return;
   if (action === 'stop' && target === 'cage' && !window.confirm('关闭隔离环境？实例内所有会话都会结束。')) return;
   if (action === 'stop' && target === 'gateway') {
-    if (!window.confirm('关闭出口网关？隔离环境会立即断网（fail-closed），直到网关重新开机。')) return;
+    if (!window.confirm('关闭出口网关？会先关闭隔离环境（KVM），再关 Clash。')) return;
   }
   powerBusy = true;
   renderWorkbench();
@@ -812,6 +859,12 @@ function paintCheckEvent(event: string, data: unknown): void {
 function handleEvent(event: string, data: unknown): void {
   if (event.startsWith('check.')) {
     paintCheckEvent(event, data);
+    return;
+  }
+  if (event.startsWith('provision.')) {
+    const d = data as { step?: string; ok?: boolean; detail?: string } | null;
+    provisionStep = d?.step ? `${d.step}${d.ok === false ? ` 失败：${d.detail ?? ''}` : ''}` : provisionStep;
+    if (view === 'workbench') renderWorkbench();
     return;
   }
   const lower = event.toLowerCase();
