@@ -1,0 +1,42 @@
+{
+  "name": "tnyc-agent-kvm",
+  "version": "0.1.0",
+  "description": "Electron workbench for agent VMs: isolated KVM guest, one proxy node, no leak",
+  "license": "MIT",
+  "private": true,
+  "main": "build/main/index.cjs",
+  "scripts": {
+    "dev": "node build.mjs --watch",
+    "build": "node build.mjs",
+    "start": "electron build/main/index.cjs",
+    "typecheck": "tsc --noEmit",
+    "dist": "node build.mjs && electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ssh2": "^1.15.1",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "ssh2": "^1.16.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "ssh2",
+      "cpu-features"
+    ]
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.24.2": true,
+    "ssh2@1.17.0": true,
+    "cpu-features@0.0.10": true
+  }
+}

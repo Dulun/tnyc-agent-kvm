@@ -1,0 +1,62 @@
+#cloud-config
+# gateway VM: the only next hop for the cage.
+#
+# Placeholders (render before use):
+#   {{GATEWAY_HOSTNAME}}  hostname of the gateway VM
+#   {{GATEWAY_USER}}      sudo-capable login user (e.g. gw)
+#   {{SSH_KEYS}}          JSON/YAML list of public keys, e.g. ["ssh-ed25519 AAAA... me@host"]
+#
+# eth0 is the WAN leg on the libvirt default network; eth1 is the isolated
+# cage-lan leg. No placeholder touches the addressing: the gateway's addresses
+# are fixed so the cage configuration and the nft ruleset can be static.
+hostname: {{GATEWAY_HOSTNAME}}
+manage_etc_hosts: true
+ssh_pwauth: false
+users:
+  - name: {{GATEWAY_USER}}
+    groups: [sudo]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys: {{SSH_KEYS}}
+package_update: true
+packages:
+  - nftables
+  - curl
+  - ca-certificates
+  - jq
+  - tcpdump
+write_files:
+  # Cloud-init must not generate a competing netplan file; ours is below.
+  - path: /etc/netplan/99-gateway.yaml
+    owner: root:root
+    permissions: '0600'
+    content: |
+      network:
+        version: 2
+        ethernets:
+          eth0:
+            dhcp4: false
+            dhcp6: false
+            accept-ra: false
+            addresses:
+              - 192.168.122.50/24
+              - "fd00:3c6a:484c:c7ee:122::2/64"
+            routes:
+              - to: default
+                via: 192.168.122.1
+              - to: default
+                via: "fd00:3c6a:484c:c7ee:122::1"
+                metric: 100
+            nameservers:
+              addresses: [1.1.1.1]
+          eth1:
+            dhcp4: false
+            dhcp6: false
+            accept-ra: false
+            addresses:
+              - 10.99.0.1/24
+              - "fdfd:99::1/64"
+
+runcmd:
+  - [netplan, apply]

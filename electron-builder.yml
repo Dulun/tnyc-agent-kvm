@@ -1,0 +1,31 @@
+appId: com.tnyc.agentkvm
+productName: TNYC Agent KVM
+directories:
+  output: release
+  buildResources: build-resources
+files:
+  - build/**/*
+  - package.json
+extraResources:
+  - from: assets
+    to: assets
+  - from: build/agent
+    to: agent
+asar: true
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

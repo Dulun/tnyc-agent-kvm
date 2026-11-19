@@ -1,0 +1,74 @@
+#!/usr/sbin/nft -f
+# Fail-closed ruleset for gateway-kvm.
+#
+# Load with:   nft -f gateway.nft
+# Inspect:     nft list table inet gw
+#
+# Invariants:
+#   - forward/input are policy drop; nothing from the cage is forwarded.
+#   - The only way out of the cage is a REDIRECT into mihomo: TCP -> 7892,
+#     DNS (TCP+UDP) -> 1053. If mihomo is down the ports are closed.
+#   - UDP other than DNS is dropped (no STUN/TURN/QUIC/mDNS/NTP).
+#   - Private/link-local/loopback destinations are dropped before the redirect,
+#     so global mode can never dial them.
+#   - Every accept and drop carries a counter: no counter-free catch-all accept.
+#
+# eth0 = WAN leg, eth1 = cage-lan leg. Keep these names in sync with the
+# cloud-init netplan file.
+add table inet gw
+delete table inet gw
+table inet gw {
+  chain prerouting {
+    type nat hook prerouting priority dstnat; policy accept;
+
+    # DNS is hijacked into mihomo's fake-ip resolver.
+    iifname "eth1" udp dport 53 counter redirect to :1053
+    iifname "eth1" tcp dport 53 counter redirect to :1053
+
+    # Fake-ip v6 answers live inside fc00::/7, so this redirect must come
+    # before the private-range drop below.
+    iifname "eth1" ip6 daddr fdfe:dcba:9876::/64 meta l4proto tcp counter redirect to :7892
+
+    # Never let a private destination become a proxy dial target.
+    iifname "eth1" ip daddr { 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16 } counter drop
+    iifname "eth1" ip6 daddr { fc00::/7, fe80::/10 } counter drop
+
+    # Everything else the cage sends over TCP is redirected into mihomo.
+    iifname "eth1" meta l4proto tcp counter redirect to :7892
+
+    # UDP survives only as DNS above.
+    iifname "eth1" udp dport != 53 counter drop
+  }
+
+  chain forward {
+    type filter hook forward priority filter; policy drop;
+
+    # Replies to gateway-initiated flows (mihomo dialing the node). The cage
+    # itself is never the source of a forwarded packet.
+    iifname "eth0" oifname "eth1" ct state established,related counter accept
+  }
+
+  chain input {
+    type filter hook input priority filter; policy drop;
+
+    iifname "lo" counter accept
+    iifname "eth0" ct state established,related counter accept
+    iifname "eth0" tcp dport 22 counter accept
+    iifname "eth0" ip protocol icmp counter accept
+    iifname "eth0" icmpv6 type { echo-request, nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert, nd-router-solicit } counter accept
+
+    # The cage may only reach mihomo's transparent ports.
+    iifname "eth1" ct state established,related counter accept
+    iifname "eth1" tcp dport { 1053, 7892 } counter accept
+    iifname "eth1" udp dport 1053 counter accept
+    iifname "eth1" ip protocol icmp counter accept
+    iifname "eth1" icmpv6 type { echo-request, nd-neighbor-solicit, nd-neighbor-advert } counter accept
+  }
+
+  chain output {
+    type filter hook output priority filter; policy accept;
+
+    # mihomo's controller can flip GLOBAL/DIRECT; keep it root-only.
+    meta skuid != 0 tcp dport 11098 counter drop
+  }
+}

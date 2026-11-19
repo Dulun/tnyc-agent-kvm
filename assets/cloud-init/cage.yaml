@@ -1,0 +1,60 @@
+#cloud-config
+# cage: single-NIC IPv4-only guest behind the gateway.
+#
+# Placeholders (render before use):
+#   {{NODE_NAME}}  hostname of the cage
+#   {{SSH_KEYS}}   JSON/YAML list of public keys, e.g. ["ssh-ed25519 AAAA... me@host"]
+#
+# Only root logs in, and only with a key. There is no DHCP on cage-lan, so the
+# address and default route are static and point at the gateway.
+hostname: {{NODE_NAME}}
+manage_etc_hosts: true
+ssh_pwauth: false
+disable_root: false
+users:
+  - name: root
+    lock_passwd: true
+    ssh_authorized_keys: {{SSH_KEYS}}
+write_files:
+  - path: /etc/ssh/sshd_config.d/60-cage-root.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      PermitRootLogin prohibit-password
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      AllowUsers root
+  - path: /etc/sysctl.d/99-cage-ipv4-only.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      net.ipv6.conf.all.disable_ipv6 = 1
+      net.ipv6.conf.default.disable_ipv6 = 1
+      net.ipv6.conf.lo.disable_ipv6 = 1
+  - path: /etc/netplan/99-cage.yaml
+    owner: root:root
+    permissions: '0600'
+    content: |
+      network:
+        version: 2
+        ethernets:
+          eth0:
+            dhcp4: false
+            dhcp6: false
+            accept-ra: false
+            addresses:
+              - 10.99.0.2/24
+            routes:
+              - to: default
+                via: 10.99.0.1
+            nameservers:
+              addresses: [10.99.0.1]
+
+runcmd:
+  - [sysctl, --system]
+  - [netplan, apply]
+  # No DHCP on cage-lan: the network only exists after netplan apply, so the
+  # guest agent is installed here rather than by the package module.
+  - [bash, -c, "command -v qemu-ga >/dev/null || (apt-get update -qq && apt-get install -y --no-install-recommends qemu-guest-agent)"]
+  - [systemctl, enable, --now, qemu-guest-agent]
+  - [systemctl, reload, ssh]

@@ -1,0 +1,5 @@
+<network>
+  <name>cage-lan</name>
+  <forward mode="none"/>
+  <bridge name="virbr-cage" stp="on" delay="0"/>
+</network>

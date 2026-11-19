@@ -1,0 +1,88 @@
+# mihomo config template for gateway-kvm.
+#
+# Rendered by the app from a single hysteria2 node. No TUN on purpose: cage
+# traffic is REDIRECTed into redir-port, so a dead core means a refused
+# connection instead of a direct route.
+#
+# Placeholders:
+#   {{NODE_NAME}}            proxy name (also the EXIT group member)
+#   {{NODE_SERVER}}          node host or IP
+#   {{NODE_PORT}}            node port
+#   {{NODE_PASSWORD}}        hysteria2 password
+#   {{NODE_SNI}}             TLS SNI
+#   {{NODE_OBFS}}            obfs type (salamander)
+#   {{NODE_OBFS_PASSWORD}}   obfs password
+#   {{NODE_FINGERPRINT}}     TLS certificate fingerprint
+#
+# Every placeholder is quoted so a substituted value can never change the
+# document structure.
+redir-port: 7892
+mixed-port: 7890
+allow-lan: true
+mode: global
+log-level: warning
+ipv6: true
+external-controller: 127.0.0.1:11098
+# The gateway must not race the host's TUN over route table 2022.
+tun:
+  enable: false
+dns:
+  enable: true
+  listen: ":1053"
+  ipv6: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-range6: "fdfe:dcba:9876::/64"
+  fake-ip-filter:
+    - "+.lan"
+    - "+.local"
+    - "time.*"
+    - "ntp.*"
+  use-hosts: true
+  default-nameserver:
+    - 2606:4700:4700::1111
+    - 2001:4860:4860::8888
+    - 1.1.1.1
+    - 8.8.8.8
+  # No bare upstream: a resolver query is a leak if it leaves without #EXIT.
+  nameserver:
+    - "tls://1.1.1.1:853#EXIT"
+    - "tls://8.8.8.8:853#EXIT"
+proxies:
+  - name: "{{NODE_NAME}}"
+    type: hysteria2
+    server: "{{NODE_SERVER}}"
+    port: "{{NODE_PORT}}"
+    up: 200 Mbps
+    down: 1000 Mbps
+    password: "{{NODE_PASSWORD}}"
+    obfs: "{{NODE_OBFS}}"
+    obfs-password: "{{NODE_OBFS_PASSWORD}}"
+    sni: "{{NODE_SNI}}"
+    skip-cert-verify: false
+    fingerprint: "{{NODE_FINGERPRINT}}"
+proxy-groups:
+  # GLOBAL must exist and must point at EXIT: global mode without a GLOBAL
+  # selector silently falls back to DIRECT.
+  - name: EXIT
+    type: select
+    proxies:
+      - "{{NODE_NAME}}"
+  - name: GLOBAL
+    type: select
+    proxies:
+      - EXIT
+rules:
+  # Global mode ignores rules; keep them safe for the case mode is flipped.
+  # No DIRECT anywhere: private and blocked destinations are REJECTed, the
+  # rest is forced through EXIT.
+  - IP-CIDR,0.0.0.0/8,REJECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,REJECT,no-resolve
+  - IP-CIDR,127.0.0.0/8,REJECT,no-resolve
+  - IP-CIDR,169.254.0.0/16,REJECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,REJECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,REJECT,no-resolve
+  - IP-CIDR,224.0.0.0/4,REJECT,no-resolve
+  - IP-CIDR6,fc00::/7,REJECT,no-resolve
+  - IP-CIDR6,fe80::/10,REJECT,no-resolve
+  - MATCH,EXIT
