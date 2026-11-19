@@ -91,6 +91,24 @@ Four independent layers, each fail-closed:
 
 See `docs/security.md` for the threat model and its limits.
 
+## Verified against a live host
+
+Tested 2026-11-19 on macOS (Electron 33) against an Ubuntu 26.04 host with libvirt 12 / QEMU 10.2,
+attached to an existing pair of guests (`gateway-kvm` + `agent-vm-xlarge`) behind one hysteria2 node:
+
+- connect → agent upload → `host.status` (relay ULA + 2 policy rules, node name, egress IP, instance discovery)
+- terminal: tmux session `cage` attaches, `TERM` is forced to `xterm-256color`, reconnects resume the session
+- leak check, 5/5: `exit 179.255.127.122 == node`, v6 exit is the node address, DNS fake-ip `198.18.0.9`,
+  STUN/QUIC `dropped dropped dropped`, host LAN `blocked`
+- DNS mode switch `fake-ip → redir-host → fake-ip`: real answer `104.20.23.154` returned, mihomo restarted,
+  checks stayed green
+- browser pane: tunnel `http://127.0.0.1:<ephemeral>/vnc.html` returns 200 (noVNC 17.8 KB) and the
+  WebSocket upgrade completes an RFB handshake (`RFB 003.008`) through
+  Electron → SSH → host agent → `ssh -J gateway` → cage → `127.0.0.1:6080`
+
+Not yet exercised: `provision.run` on a blank host (needs a fresh qcow2/cloud image), node change
+(`proxy.set`) rollback path, and packaging on Windows/Linux.
+
 ## Repository layout
 
 | Path | Purpose |
