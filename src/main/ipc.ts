@@ -33,6 +33,7 @@ interface Session {
 }
 
 let session: Session | null = null;
+let lastTarget: HostTarget | null = null;
 let terminalManager: TerminalManager | null = null;
 
 const RPC_METHODS: Record<RpcMethod, true> = {
@@ -135,6 +136,17 @@ function rpcMethod(value: unknown): RpcMethod {
   return value as RpcMethod;
 }
 
+async function reconnectSession(): Promise<Session> {
+  if (!lastTarget) throw new Error('not connected to a host');
+  teardown();
+  const conn = await connectTarget(lastTarget);
+  const { agentPath } = await ensureAgent(conn);
+  const channel = await conn.exec(`node ${shq(agentPath)} rpc`);
+  const rpc = new AgentRpc(channel);
+  session = { conn, rpc, agentPath };
+  return session;
+}
+
 function requireSession(): Session {
   if (!session) throw new Error('not connected to a host');
   return session;
@@ -163,6 +175,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle(IPC.connect, async (_event, raw: unknown): Promise<HostStatus> => {
     const target = asTarget(raw);
+    lastTarget = target;
     teardown();
     const conn = await connectTarget(target);
     try {

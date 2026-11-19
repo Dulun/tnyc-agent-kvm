@@ -109,10 +109,10 @@ export class TerminalTabs {
   }
 
   async open(session?: string): Promise<void> {
-    // Every「新会话」 gets its own tmux session; reusing one name made the new tab
-    // attach the existing terminal, which looked like "the same terminal again".
-    const name = session ?? `cage-${++this.seq}`;
-    const title = `tmux:${name}`;
+    // Default tabs are a plain shell: tmux paints on the alternate screen, which
+    // leaves xterm with no scrollback and makes the wheel dead. tmux is only used
+    // when the caller explicitly attaches a named session.
+    const title = session ? `tmux:${session}` : `shell ${++this.seq}`;
     const loading = document.createElement('div');
     loading.className = 'term-loading';
     loading.textContent = '正在打开会话…';
@@ -120,7 +120,7 @@ export class TerminalTabs {
 
     let handle: TerminalHandle;
     try {
-      handle = await this.app.terminalOpen({ cols: 80, rows: 24, session: name });
+      handle = await this.app.terminalOpen({ cols: 80, rows: 24, ...(session ? { session } : {}) });
     } catch (error) {
       loading.textContent = `打开会话失败：${error instanceof Error ? error.message : String(error)}`;
       window.setTimeout(() => loading.remove(), 8000);

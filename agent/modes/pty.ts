@@ -32,7 +32,7 @@ export function runPty(opts: PtyOptions): Promise<void> {
   ].join('; ');
   const remote = opts.session
     ? `${prep}; tmux new-session -A -s ${sq(opts.session)} -x ${opts.cols} -y ${opts.rows}`
-    : 'exec bash -l';
+    : 'bash -l';  // `exec` is not an env(1) argument; the wrapper below is env(1)
   const child = spawn('ssh', [...SSH_OPTS, '-tt', '-J', GATEWAY, CAGE, `env TERM=xterm-256color LC_ALL=C.UTF-8 ${remote}`], {
     stdio: ['pipe', 'inherit', 'inherit'],
     env: { ...process.env, TERM: 'xterm-256color' },

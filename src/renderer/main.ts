@@ -267,7 +267,10 @@ function setView(next: View): void {
   if (next === 'ssh' && !term && api) {
     if (viewEls) {
       term = new TerminalTabs(api, viewEls.ssh);
-      void term.open('cage');
+      // Plain shell, no tmux: tmux paints on the alternate screen, which leaves
+      // xterm with zero scrollback and makes the wheel dead. A plain shell keeps
+      // history in the client, which is what makes scrolling work.
+      void term.open();
     }
   }
   if (next === 'browser' && !browserPane && api) {
