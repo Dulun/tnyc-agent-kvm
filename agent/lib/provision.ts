@@ -161,6 +161,36 @@ ExecStart=/usr/local/lib/tnyc-host-relay.sh
 WantedBy=multi-user.target
 `;
 
+const GATEWAY_EGRESS_SCRIPT = `#!/usr/bin/env bash
+set -euo pipefail
+read -r addr port < /etc/gateway-node
+nft flush chain inet gw output 2>/dev/null || true
+nft -f - <<NFT
+table inet gw {
+  chain output {
+    type filter hook output priority filter; policy drop;
+    oifname "lo" counter accept
+    ct state established,related counter accept
+    oifname "eth1" counter accept
+    ip6 daddr $addr udp dport $port counter accept
+    icmpv6 type { echo-request, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } counter accept
+  }
+}
+NFT
+`;
+
+const GATEWAY_EGRESS_UNIT = `[Unit]
+Description=Pin gateway egress to the provisioned node
+After=network-online.target
+Before=mihomo.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/gateway-egress
+[Install]
+WantedBy=multi-user.target
+`;
+
 const MIHOMO_UNIT = `[Unit]
 Description=mihomo (cage gateway)
 After=network-online.target
@@ -511,6 +541,11 @@ export async function provisionRun(raw: unknown, ctx: Ctx): Promise<void> {
       { timeoutMs: 30_000 },
     );
     await gwInstallText('/etc/systemd/system/mihomo.service', MIHOMO_UNIT, '644');
+    // The kernel allow-list is written once, here; a later config edit cannot
+    // widen it, so a hot node switch has no route at all.
+    await gwInstallText('/etc/gateway-node', `${node.server} ${node.port}\n`, '600');
+    await gwInstallText('/usr/local/bin/gateway-egress', GATEWAY_EGRESS_SCRIPT, '755');
+    await gwInstallText('/etc/systemd/system/gateway-egress.service', GATEWAY_EGRESS_UNIT, '644');
     await gwInstallText('/usr/local/bin/gw-mode-boot', GW_MODE_SCRIPT, '755');
     await gwInstallText('/etc/systemd/system/gw-mode.service', GW_MODE_UNIT, '644');
     const nft = readFileSync(findAsset('nft/gateway.nft'), 'utf8');
@@ -519,9 +554,10 @@ export async function provisionRun(raw: unknown, ctx: Ctx): Promise<void> {
       [
         'set -e',
         'systemctl daemon-reload',
-        'systemctl enable mihomo.service gw-mode.service >/dev/null 2>&1 || true',
+        'systemctl enable mihomo.service gw-mode.service gateway-egress.service >/dev/null 2>&1 || true',
         'nft delete table inet gw 2>/dev/null || true',
         'nft -f /etc/nftables-gw.nft',
+        '/usr/local/bin/gateway-egress',
         'systemctl restart mihomo',
         'systemctl restart gw-mode.service',
       ].join('\n'),
