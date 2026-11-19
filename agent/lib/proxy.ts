@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import type { DnsMode, NodeConfig, ProxySetParams, ProxyStep } from '../../src/shared/rpc';
 import { runCheck } from './check';
-import { gwOk, gwSudo, gwSudoOk, gwSudoScript } from './ssh';
+import { gwOk, gwSudo, gwSudoOk, gwSudoScript, waitForGateway } from './ssh';
 import { findInstance, startInstance, stopInstance } from './status';
 import { AgentError, ERR, type Ctx } from './types';
 import { findAsset, sleep, sq, tail, yamlScalar } from './util';
@@ -343,4 +343,10 @@ export async function dnsSet(raw: unknown): Promise<void> {
     if (backup) await restoreConfig(backup).catch(() => undefined);
     throw err instanceof AgentError ? err : new AgentError(ERR.generic, (err as Error).message);
   }
+}
+
+/** Restart the Clash core only, mirroring Clash Verge's "restart core". */
+export async function restartCore(): Promise<void> {
+  await gwSudoOk('systemctl restart mihomo', { timeoutMs: 60_000 });
+  await waitForGateway();
 }

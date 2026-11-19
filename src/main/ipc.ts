@@ -40,6 +40,8 @@ const RPC_METHODS: Record<RpcMethod, true> = {
   'host.status': true,
   'instance.start': true,
   'instance.stop': true,
+  'vm.power': true,
+  'gateway.restartCore': true,
   'provision.plan': true,
   'provision.run': true,
   'proxy.get': true,
@@ -320,6 +322,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.instanceStop, async (_event, id: unknown): Promise<void> => {
     // graceful stop + force + wait takes ~105s on the host
     await requireSession().rpc.request('instance.stop', { id: asString(id, 'instance id') }, 180_000);
+  });
+
+  ipcMain.handle(IPC.vmPower, async (_event, target: unknown, action: unknown): Promise<void> => {
+    if ((target !== 'cage' && target !== 'gateway') || (action !== 'start' && action !== 'stop')) {
+      throw new Error('vm power needs target cage|gateway and action start|stop');
+    }
+    await requireSession().rpc.request('vm.power', { target, action }, 0);
+  });
+
+  ipcMain.handle(IPC.gatewayRestartCore, async (): Promise<void> => {
+    await requireSession().rpc.request('gateway.restartCore', undefined, 120_000);
   });
 
   ipcMain.handle(IPC.instances, async (): Promise<Instance[]> => {

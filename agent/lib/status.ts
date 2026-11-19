@@ -207,6 +207,7 @@ export async function instanceList(): Promise<Instance[]> {
         name,
         state: mapState(states.get(name)),
         gatewayName: 'gateway-kvm',
+        gatewayState: mapState(states.get('gateway-kvm')),
         cageIp: '10.99.0.2',
         vcpus: 0,
         memMb: 0,
@@ -217,10 +218,34 @@ export async function instanceList(): Promise<Instance[]> {
     name: record.name,
     state: mapState(states.get(record.name) ?? states.get(record.gatewayName)),
     gatewayName: record.gatewayName,
+    gatewayState: mapState(states.get(record.gatewayName)),
     cageIp: record.cageIp,
     vcpus: record.vcpus,
     memMb: record.memMb,
   }));
+}
+
+/** Power one VM on its own, without touching the other. */
+export async function vmPower(target: 'cage' | 'gateway', action: 'start' | 'stop'): Promise<void> {
+  const rec = await findInstance();
+  const name = target === 'gateway' ? (rec?.gatewayName ?? 'gateway-kvm') : (rec?.name ?? (await instanceList())[0]?.name);
+  if (!name) throw new AgentError(ERR.missing, 'no instance provisioned on this host');
+  const current = (await virsh(['domstate', name], { timeoutMs: 10_000 })).stdout.trim();
+  if (action === 'start') {
+    if (current === 'running') return;
+    const res = await virsh(['start', name], { timeoutMs: 60_000 });
+    if (res.code !== 0 && !/already active/i.test(res.stderr)) {
+      throw new AgentError(ERR.generic, `virsh start ${name}: ${tail(res.stderr, 4)}`);
+    }
+    if (!(await waitForVmState(name, 'running', 180_000))) throw new AgentError(ERR.timeout, `${name} did not start`);
+    if (target === 'gateway') await waitForGateway().catch(() => undefined);
+    return;
+  }
+  if (current === 'shut off') return;
+  await virsh(['shutdown', name], { timeoutMs: 60_000 });
+  if (await waitForVmState(name, 'shut off', 90_000)) return;
+  await virsh(['destroy', name], { timeoutMs: 30_000 });
+  if (!(await waitForVmState(name, 'shut off', 15_000))) throw new AgentError(ERR.timeout, `${name} did not stop`);
 }
 
 export async function findInstance(id?: string): Promise<InstanceRecord | null> {

@@ -73,6 +73,8 @@ export interface AppApi {
 
   instanceStart(id: string): Promise<void>;
   instanceStop(id: string): Promise<void>;
+  vmPower(target: 'cage' | 'gateway', action: 'start' | 'stop'): Promise<void>;
+  gatewayRestartCore(): Promise<void>;
   instances(): Promise<Instance[]>;
 
   terminalOpen(opts: TerminalOptions): Promise<TerminalHandle>;
@@ -112,6 +114,8 @@ export const IPC = {
   guestBootstrap: 'app:guestBootstrap',
   instanceStart: 'app:instanceStart',
   instanceStop: 'app:instanceStop',
+  vmPower: 'app:vmPower',
+  gatewayRestartCore: 'app:gatewayRestartCore',
   instances: 'app:instances',
   terminalOpen: 'term:open',
   terminalWrite: 'term:write',

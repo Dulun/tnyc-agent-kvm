@@ -37,6 +37,8 @@ const api: AppApi = {
 
   instanceStart: (id) => ipcRenderer.invoke(IPC.instanceStart, id),
   instanceStop: (id) => ipcRenderer.invoke(IPC.instanceStop, id),
+  vmPower: (target, action) => ipcRenderer.invoke(IPC.vmPower, target, action),
+  gatewayRestartCore: () => ipcRenderer.invoke(IPC.gatewayRestartCore),
   instances: () => ipcRenderer.invoke(IPC.instances),
 
   terminalOpen: (opts) => ipcRenderer.invoke(IPC.terminalOpen, opts),

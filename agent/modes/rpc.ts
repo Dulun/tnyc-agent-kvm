@@ -17,10 +17,11 @@ import {
   startInstance,
   stopInstance,
   instanceList,
+  vmPower,
 } from '../lib/status';
 import { guestExec } from '../lib/ssh';
 import { guestBootstrap, provisionPlan, provisionRun } from '../lib/provision';
-import { dnsSet, proxySet } from '../lib/proxy';
+import { dnsSet, proxySet, restartCore } from '../lib/proxy';
 import { AgentError, ERR, type Ctx } from '../lib/types';
 import { tail } from '../lib/util';
 
@@ -35,10 +36,18 @@ const HANDLERS: Record<RpcMethod, Handler> = {
   'host.status': () => getStatus(),
   'instance.start': (params) => startInstance(instanceId(params)),
   'instance.stop': (params) => stopInstance(instanceId(params)),
+  'vm.power': (params) => {
+    const p = params as { target?: unknown; action?: unknown } | null;
+    if ((p?.target !== 'cage' && p?.target !== 'gateway') || (p?.action !== 'start' && p?.action !== 'stop')) {
+      throw new AgentError(ERR.params, 'target must be cage|gateway and action start|stop');
+    }
+    return vmPower(p.target, p.action);
+  },
   'provision.plan': (params) => provisionPlan(params),
   'provision.run': (params, ctx) => provisionRun(params, ctx),
   'proxy.get': () => getProxyState(),
   'proxy.set': (params, ctx) => proxySet(params as ProxySetParams, ctx),
+  'gateway.restartCore': () => restartCore(),
   'dns.get': () => getDnsMode(),
   'dns.set': (params) => dnsSet(params),
   'check.run': async (params, ctx) => {
@@ -154,6 +163,8 @@ const MUTATING: Partial<Record<RpcMethod, true>> = {
   'provision.run': true,
   'proxy.set': true,
   'dns.set': true,
+  'vm.power': true,
+  'gateway.restartCore': true,
 };
 let busy: RpcMethod | null = null;
 

@@ -462,7 +462,9 @@ function renderWorkbench(): void {
   if (!status || !viewEls) return;
   const check = status.lastCheck;
   const pass = check?.ok === true;
-  const running = status.instances[0]?.state === 'running';
+  const instance = status.instances[0];
+  const running = instance?.state === 'running';
+  const gatewayRunning = instance?.gatewayState === 'running';
   const checkText = !check ? '尚未运行泄漏检查' : check.ok ? '网络检查通过' : '网络检查未通过';
   const user = target?.username ?? status.hostname;
   const host = target?.host ?? status.hostname;
@@ -476,6 +478,13 @@ function renderWorkbench(): void {
         <div class="wb-row">
           <span class="wb-icon">${icon('shield', 18)}</span>
           <span class="wb-row-text"><b>隔离环境</b><small>${running ? '运行中' : '已停止'}</small></span>
+          <button type="button" class="ghost" id="wb-cage-power" ${powerBusy ? 'disabled' : ''}>${running ? '关机' : '开机'}</button>
+        </div>
+        <div class="wb-row">
+          <span class="dot ${gatewayRunning ? 'ok' : 'bad'}"></span>
+          <span class="wb-row-text"><b>出口网关 · Clash</b><small>${instance?.gatewayName ?? 'gateway-kvm'} · ${gatewayRunning ? '运行中' : '已停止'}</small></span>
+          <button type="button" class="ghost" id="wb-gw-core" ${powerBusy || !gatewayRunning ? 'disabled' : ''}>重启内核</button>
+          <button type="button" class="ghost" id="wb-gw-power" ${powerBusy ? 'disabled' : ''}>${gatewayRunning ? '关机' : '开机'}</button>
         </div>
         <div class="wb-row">
           <span class="dot ${pass ? 'ok' : 'bad'}"></span>
@@ -494,6 +503,9 @@ function renderWorkbench(): void {
   viewEls.workbench.querySelector('#wb-new-term')?.addEventListener('click', () => void newTerminal());
   viewEls.workbench.querySelector('#wb-browser')?.addEventListener('click', () => setView('browser'));
   viewEls.workbench.querySelector('#wb-check')?.addEventListener('click', () => void runCheck());
+  viewEls.workbench.querySelector('#wb-cage-power')?.addEventListener('click', () => void runVmPower('cage', running ? 'stop' : 'start'));
+  viewEls.workbench.querySelector('#wb-gw-power')?.addEventListener('click', () => void runVmPower('gateway', gatewayRunning ? 'stop' : 'start'));
+  viewEls.workbench.querySelector('#wb-gw-core')?.addEventListener('click', () => void runCoreRestart());
 }
 
 function openSettingsView(): void {
@@ -550,6 +562,40 @@ async function runCheck(): Promise<void> {
   } finally {
     checking = false;
     paint();
+  }
+}
+
+let powerBusy = false;
+
+async function runVmPower(target: 'cage' | 'gateway', action: 'start' | 'stop'): Promise<void> {
+  if (!api || powerBusy) return;
+  if (action === 'stop' && target === 'cage' && !window.confirm('关闭隔离环境？实例内所有会话都会结束。')) return;
+  if (action === 'stop' && target === 'gateway') {
+    if (!window.confirm('关闭出口网关？隔离环境会立即断网（fail-closed），直到网关重新开机。')) return;
+  }
+  powerBusy = true;
+  renderWorkbench();
+  try {
+    await api.vmPower(target, action);
+  } catch (failure) {
+    errorMessage = messageOf(failure);
+  } finally {
+    powerBusy = false;
+    await refresh();
+  }
+}
+
+async function runCoreRestart(): Promise<void> {
+  if (!api || powerBusy) return;
+  powerBusy = true;
+  renderWorkbench();
+  try {
+    await api.gatewayRestartCore();
+  } catch (failure) {
+    errorMessage = messageOf(failure);
+  } finally {
+    powerBusy = false;
+    await refresh();
   }
 }
 

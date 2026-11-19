@@ -30,6 +30,8 @@ export type RpcMethod =
   | 'host.status'
   | 'instance.start'
   | 'instance.stop'
+  | 'vm.power'
+  | 'gateway.restartCore'
   | 'provision.plan'
   | 'provision.run'
   | 'proxy.get'
@@ -93,6 +95,7 @@ export interface Instance {
   name: string;
   state: InstanceState;
   gatewayName: string;
+  gatewayState: InstanceState;
   cageIp: string;
   vcpus: number;
   memMb: number;
@@ -148,6 +151,11 @@ export interface ProxyStepEvent {
 }
 
 /** Payloads */
+export interface VmPowerParams {
+  target: 'cage' | 'gateway';
+  action: 'start' | 'stop';
+}
+
 export interface ProxySetParams {
   node: NodeConfig;
   /** typed by the user in the confirmation dialog; must equal the instance name */
