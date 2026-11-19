@@ -1,6 +1,33 @@
 import type { AppApi, HostTarget } from '../shared/ipc';
 import type { DnsMode, HostStatus, NodeConfig, ProxyStep, ProxyStepEvent } from '../shared/rpc';
 
+async function askConfirm(title: string, message: string): Promise<boolean> {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal"><h2></h2><p class="modal-sub"></p>
+    <div class="modal-actions"><span></span><span class="modal-buttons">
+      <button type="button" class="ghost" id="ok-cancel">取消</button>
+      <button type="button" class="danger" id="ok-yes">确认更换</button>
+    </span></div></div>`;
+  const h = overlay.querySelector('h2');
+  const p = overlay.querySelector('.modal-sub');
+  if (h) h.textContent = title;
+  if (p) p.textContent = message;
+  document.body.append(overlay);
+  return new Promise<boolean>((resolve) => {
+    const done = (value: boolean): void => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.querySelector('#ok-yes')?.addEventListener('click', () => done(true));
+    overlay.querySelector('#ok-cancel')?.addEventListener('click', () => done(false));
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') done(false);
+      if (e.key === 'Enter') done(true);
+    });
+  });
+}
+
 export interface SettingsContext {
   app: AppApi;
   target: HostTarget | null;
@@ -278,6 +305,17 @@ export function mountSettings(root: HTMLElement, ctx: SettingsContext): () => vo
     const sni = nodeSni.value.trim();
     if (sni) node.sni = sni;
     submittedName = node.name;
+
+    // Second gate: switching the exit is the one operation that can leak, so it
+    // needs a typed instance name *and* an explicit confirmation afterwards.
+    const second = await askConfirm(
+      '确认更换出口节点',
+      `客机将关机，所有远程连接断开，随后用新节点重新启动。确认把出口切到「${node.name}」？`,
+    );
+    if (!second) {
+      submitBtn.disabled = false;
+      return;
+    }
 
     try {
       await app.proxySet({ node, confirmName: confirmInput.value });

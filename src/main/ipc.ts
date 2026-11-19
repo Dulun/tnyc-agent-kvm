@@ -56,6 +56,7 @@ const RPC_METHODS: Record<RpcMethod, true> = {
   'browser.useProfile': true,
   'browser.renameProfile': true,
   'browser.createProfile': true,
+  'browser.deleteProfile': true,
 };
 
 /** Methods that legitimately run for minutes on the host; never time these out. */
@@ -72,6 +73,7 @@ const LONG_RUNNING: Record<string, true> = {
   'browser.useProfile': true,
   'browser.renameProfile': true,
   'browser.createProfile': true,
+  'browser.deleteProfile': true,
 };
 
 function asInteger(value: unknown, name: string, min: number, max: number): number {
@@ -277,6 +279,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     if (typeof id !== 'string' || !/^[\w.-]{1,32}$/.test(id)) throw new Error('invalid profile id');
     if (typeof label !== 'string' || label.trim() === '' || label.length > 32) throw new Error('invalid label');
     return requireSession().rpc.request<void>('browser.renameProfile', { id, label });
+  });
+  ipcMain.handle(IPC.browserDeleteProfile, (_event, id: unknown): Promise<void> => {
+    if (typeof id !== 'string' || !/^[\w.-]{1,32}$/.test(id)) throw new Error('invalid profile id');
+    return requireSession().rpc.request<void>('browser.deleteProfile', { id });
   });
   ipcMain.handle(IPC.browserCreateProfile, (_event, label: unknown): Promise<void> => {
     if (typeof label !== 'string' || label.trim() === '' || label.length > 32) throw new Error('invalid label');

@@ -89,6 +89,13 @@ const HANDLERS: Record<RpcMethod, Handler> = {
     }
     return { profiles, labels, current };
   },
+  'browser.deleteProfile': async (params) => {
+    const id = (params as { id?: unknown } | undefined)?.id;
+    if (typeof id !== 'string' || !/^[\w.-]{1,32}$/.test(id)) throw new AgentError(ERR.params, 'profile id is invalid');
+    const res = await guestExec(await cageVm(), `cage-profile remove ${id}`, 60_000);
+    if (res.code !== 0) throw new AgentError(ERR.generic, res.out.trim() || 'profile removal failed');
+    return {};
+  },
   'browser.createProfile': async (params) => {
     const label = (params as { label?: unknown } | undefined)?.label;
     if (typeof label !== 'string' || label.trim() === '' || label.length > 32) throw new AgentError(ERR.params, 'label is invalid');

@@ -149,7 +149,8 @@ export class TerminalTabs {
     const host = document.createElement('div');
     host.className = 'term-host';
     const term = new Terminal({
-      fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+      fontFamily:
+        'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", monospace',
       fontSize: this.fontSize,
       lineHeight: 1.25,
       cursorBlink: true,

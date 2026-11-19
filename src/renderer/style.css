@@ -375,3 +375,9 @@ body.browser-focus .browser-body webview { border-radius: 0; border: 0; height: 
 .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .browser-view { padding: 0 !important; }
 .browser-view .browser-body { margin: 0; border-radius: 0 0 12px 12px; border-top: 0; }
+
+.ctx-menu { position: fixed; z-index: 60; min-width: 140px; padding: 4px; background: #fff; border: 1px solid var(--border); border-radius: 9px; box-shadow: 0 10px 28px rgba(0,0,0,.16); display: flex; flex-direction: column; gap: 2px; }
+.ctx-item { text-align: left; padding: 6px 10px; font-size: 12.5px; border: 0; border-radius: 6px; background: transparent; color: var(--text); }
+.ctx-item:hover { background: #f2f0ec; }
+.ctx-item.danger { color: var(--bad); }
+.ctx-item.danger:hover { background: #fdefed; }

@@ -9,12 +9,13 @@ REG=/root/.cage-profiles
 CUR=/root/.cage-profile
 
 ensure_reg() {
+  local d existing
   [ -f "$REG" ] || : > "$REG"
   # adopt profiles that already exist on disk (created before the registry)
   for d in /root/.chrome-*; do
     [ -d "$d" ] || continue
-    id=${d#/root/.chrome-}
-    grep -q "^$id|" "$REG" 2>/dev/null || printf '%s|%s\n' "$id" "$id" >> "$REG"
+    existing=${d#/root/.chrome-}
+    grep -q "^$existing|" "$REG" 2>/dev/null || printf '%s|%s\n' "$existing" "$existing" >> "$REG"
   done
   [ -s "$REG" ] || printf 'cage|cage\n' > "$REG"
   [ -f "$CUR" ] || echo cage > "$CUR"
@@ -45,6 +46,15 @@ case "${1:-list}" in
     # rewrites one line; the running browser keeps its dir, so no restart
     awk -F'|' -v id="$id" -v l="$label" 'BEGIN{OFS="|"} $1==id{$2=l} {print}' "$REG" > "$REG.tmp"
     mv "$REG.tmp" "$REG"
+    ;;
+  remove)
+    id="${2:?usage: cage-profile remove <id>}"
+    ensure_reg
+    cur=$(cat "$CUR")
+    [ "$id" = "$cur" ] && { echo "cannot remove the profile in use; switch first" >&2; exit 3; }
+    grep -q "^$id|" "$REG" || { echo "unknown profile" >&2; exit 2; }
+    awk -F'|' -v id="$id" '$1!=id' "$REG" > "$REG.tmp" && mv "$REG.tmp" "$REG"
+    rm -rf "/root/.chrome-$id"
     ;;
   use)
     id="${2:?usage: cage-profile use <id>}"

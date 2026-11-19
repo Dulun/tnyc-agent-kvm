@@ -44,6 +44,7 @@ export type RpcMethod =
   | 'browser.useProfile'
   | 'browser.renameProfile'
   | 'browser.createProfile'
+  | 'browser.deleteProfile'
   | 'dns.get'
   | 'dns.set';
 

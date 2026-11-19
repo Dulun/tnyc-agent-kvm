@@ -30,6 +30,7 @@ const api: AppApi = {
   browserUseProfile: (name) => ipcRenderer.invoke(IPC.browserUseProfile, name),
   browserRenameProfile: (id, label) => ipcRenderer.invoke(IPC.browserRenameProfile, id, label),
   browserCreateProfile: (label) => ipcRenderer.invoke(IPC.browserCreateProfile, label),
+  browserDeleteProfile: (id) => ipcRenderer.invoke(IPC.browserDeleteProfile, id),
   checkRun: (params) => ipcRenderer.invoke(IPC.checkRun, params),
   guestExec: (params) => ipcRenderer.invoke(IPC.guestExec, params),
   guestBootstrap: () => ipcRenderer.invoke(IPC.guestBootstrap),

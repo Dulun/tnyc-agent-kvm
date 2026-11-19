@@ -213,16 +213,39 @@ function mountShell(): void {
             }
             setView('browser');
           });
-          row.addEventListener('contextmenu', async (event) => {
+          row.addEventListener('contextmenu', (event) => {
             event.preventDefault();
-            const to = (await askText('重命名浏览器配置', labelText))?.trim();
-            if (!to || to === labelText) return;
-            try {
-              await api.browserRenameProfile(name, to);
-            } catch (error) {
-              window.alert(error instanceof Error ? error.message : String(error));
-            }
-            await refreshProfiles();
+            showContextMenu(event.clientX, event.clientY, [
+              {
+                label: '重命名',
+                onClick: () => {
+                  void askText('重命名浏览器配置', labelText).then(async (to) => {
+                    const next = to?.trim();
+                    if (!next || next === labelText) return;
+                    try {
+                      await api.browserRenameProfile(name, next);
+                    } catch (error) {
+                      window.alert(error instanceof Error ? error.message : String(error));
+                    }
+                    await refreshProfiles();
+                  });
+                },
+              },
+              {
+                label: '删除',
+                danger: true,
+                onClick: async () => {
+                  if (!(await askConfirm('删除浏览器配置', `「${labelText}」将连同其中保存的 cookie 与登录状态一起删除。`))) return;
+                  if (!(await askConfirm('再次确认', '删除后无法恢复，确定继续？'))) return;
+                  try {
+                    await api.browserDeleteProfile(name);
+                  } catch (error) {
+                    window.alert(error instanceof Error ? error.message : String(error));
+                  }
+                  await refreshProfiles();
+                },
+              },
+            ]);
           });
           row.append(label);
           return row;
@@ -269,9 +292,16 @@ function mountShell(): void {
         });
         row.addEventListener('contextmenu', (event) => {
           event.preventDefault();
-          void askText('重命名终端', tab.title).then((next) => {
-            if (next?.trim()) term?.renameTab(tab.id, next.trim());
-          });
+          showContextMenu(event.clientX, event.clientY, [
+            {
+              label: '重命名',
+              onClick: () =>
+                void askText('重命名终端', tab.title).then((next) => {
+                  if (next?.trim()) term?.renameTab(tab.id, next.trim());
+                }),
+            },
+            { label: '关闭', danger: true, onClick: () => term?.closeTab(tab.id) },
+          ]);
         });
         const close = document.createElement('button');
         close.type = 'button';
@@ -321,12 +351,12 @@ function ensureTerminal(): TerminalTabs | null {
  * opening a tab here can never race with a second open from the view switch.
  */
 async function newTerminal(session?: string): Promise<void> {
-  setView('ssh');
+  setView('ssh', { openIfEmpty: false });
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   await ensureTerminal()?.open(session);
 }
 
-function setView(next: View): void {
+function setView(next: View, opts: { openIfEmpty?: boolean } = {}): void {
   // leaving the browser view must always restore the sidebar, even if a
   // previous build left the focus class behind
   if (next !== 'browser') document.body.classList.remove('browser-focus');
@@ -341,7 +371,7 @@ function setView(next: View): void {
     // Creating the pane is not the same as opening a session: switching to the
     // view only reattaches the existing pane, so a click can't spawn two tabs.
     const tabs = ensureTerminal();
-    if (tabs && tabs.list().length === 0) void tabs.open();
+    if (opts.openIfEmpty !== false && tabs && tabs.list().length === 0) void tabs.open();
   }
   if (next === 'browser' && !browserPane && api) {
     if (viewEls) browserPane = mountBrowser(api, viewEls.browser);
@@ -548,6 +578,40 @@ async function runInstance(action: 'start' | 'stop'): Promise<void> {
 /* ---------- lifecycle ---------- */
 
 
+/** Async confirm; window.confirm blocks the renderer and cannot be scripted. */
+async function askConfirm(title: string, message: string): Promise<boolean> {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h2></h2>
+      <p class="modal-sub"></p>
+      <div class="modal-actions"><span></span>
+        <span class="modal-buttons">
+          <button type="button" class="ghost" id="ok-cancel">取消</button>
+          <button type="button" class="danger" id="ok-yes">确定删除</button>
+        </span>
+      </div>
+    </div>`;
+  const h = overlay.querySelector('h2');
+  const p = overlay.querySelector('.modal-sub');
+  if (h) h.textContent = title;
+  if (p) p.textContent = message;
+  document.body.append(overlay);
+  return new Promise<boolean>((resolve) => {
+    const finish = (value: boolean): void => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.querySelector('#ok-yes')?.addEventListener('click', () => finish(true));
+    overlay.querySelector('#ok-cancel')?.addEventListener('click', () => finish(false));
+    overlay.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') finish(false);
+      if (event.key === 'Enter') finish(true);
+    });
+  });
+}
+
 /** Electron has no window.prompt; this is the same thing without native dialogs. */
 function askText(title: string, value = ''): Promise<string | null> {
   const overlay = document.createElement('div');
@@ -585,6 +649,47 @@ function askText(title: string, value = ''): Promise<string | null> {
       if (event.key === 'Escape') done(null);
     });
   });
+}
+
+
+/** Small in-app context menu (Electron has no renderer-side native menu). */
+function showContextMenu(x: number, y: number, items: Array<{ label: string; danger?: boolean; onClick: () => void }>): void {
+  document.querySelector('.ctx-menu')?.remove();
+  const menu = document.createElement('div');
+  menu.className = 'ctx-menu';
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  for (const item of items) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `ctx-item${item.danger ? ' danger' : ''}`;
+    button.textContent = item.label;
+    button.addEventListener('click', () => {
+      menu.remove();
+      item.onClick();
+    });
+    menu.append(button);
+  }
+  document.body.append(menu);
+  const close = (): void => {
+    menu.remove();
+    document.removeEventListener('mousedown', close);
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') close();
+  };
+  window.setTimeout(() => {
+    document.addEventListener(
+      'mousedown',
+      (event) => {
+        if (menu.contains(event.target as Node)) return; // clicking an item must not close the menu first
+        close();
+      },
+      { once: true },
+    );
+    document.addEventListener('keydown', onKey);
+  }, 0);
 }
 
 let checkModal: HTMLElement | null = null;
