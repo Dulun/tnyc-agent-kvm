@@ -50,9 +50,18 @@ case "${1:-list}" in
   remove)
     id="${2:?usage: cage-profile remove <id>}"
     ensure_reg
-    cur=$(cat "$CUR")
-    [ "$id" = "$cur" ] && { echo "cannot remove the profile in use; switch first" >&2; exit 3; }
     grep -q "^$id|" "$REG" || { echo "unknown profile" >&2; exit 2; }
+    cur=$(cat "$CUR")
+    if [ "$id" = "$cur" ]; then
+      # Deleting the active profile: move to another one first (one restart),
+      # then remove; refuse only when it is the last one left.
+      other=$(awk -F'|' -v id="$id" '$1!=id {print $1; exit}' "$REG")
+      [ -n "$other" ] || { echo "cannot remove the only profile" >&2; exit 3; }
+      echo "$other" > "$CUR"
+      mkdir -p "/root/.chrome-$other"
+      systemctl restart cage-browser
+      sleep 2
+    fi
     awk -F'|' -v id="$id" '$1!=id' "$REG" > "$REG.tmp" && mv "$REG.tmp" "$REG"
     rm -rf "/root/.chrome-$id"
     ;;
