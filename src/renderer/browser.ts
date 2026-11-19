@@ -3,6 +3,11 @@ import type { AppApi, TunnelInfo } from '../shared/ipc';
 export interface BrowserPane {
   reload(): void;
   destroy(): void;
+  /** open the current guest desktop in the system browser */
+  openExternal(): void;
+  /** toggle the chrome-free full-window view */
+  toggleFullscreen(): void;
+  url(): string;
 }
 
 const NOVNC_PORT = 6080;
@@ -19,23 +24,15 @@ function noVncUrl(raw: string): string {
 
 export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
   pane.innerHTML = `
-    <div class="browser-toolbar">
-      <span class="url" id="browser-url">未连接</span>
-      <button type="button" class="ghost" id="browser-reload">重载</button>
-      <button type="button" class="ghost" id="browser-full">全屏</button>
-      <button type="button" class="ghost" id="browser-new">新窗口</button>
-    </div>
     <div class="browser-body">
       <div class="browser-overlay" id="browser-overlay"></div>
     </div>`;
 
   const body = pane.querySelector<HTMLElement>('.browser-body');
   const overlay = pane.querySelector<HTMLElement>('#browser-overlay');
-  const urlLabel = pane.querySelector<HTMLElement>('#browser-url');
-  if (!body || !overlay || !urlLabel) throw new Error('browser markup missing');
+  if (!body || !overlay) throw new Error('browser markup missing');
   const bodyEl = body;
   const overlayEl = overlay;
-  const urlLabelEl = urlLabel;
 
   let tunnel: TunnelInfo | null = null;
   let current: string | null = null;
@@ -54,7 +51,6 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
   async function load(): Promise<void> {
     const seq = ++loadSeq;
     showOverlay('正在打开访客桌面…');
-    urlLabelEl.textContent = '连接中…';
     try {
       if (tunnel) await app.closeTunnel(tunnel.url).catch(() => undefined);
       tunnel = await app.openTunnel(NOVNC_PORT);
@@ -64,8 +60,6 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
       }
       const src = noVncUrl(tunnel.url);
       current = src;
-      urlLabelEl.textContent = src;
-      urlLabelEl.title = src;
       const frame = document.createElement('webview') as HTMLElement & { src: string };
       frame.title = '访客桌面';
       frame.setAttribute('allowpopups', '');
@@ -109,38 +103,35 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
     } catch (error) {
       if (seq !== loadSeq) return;
       current = null;
-      urlLabelEl.textContent = '连接失败';
-      urlLabelEl.title = '';
       showOverlay(`无法打开访客桌面：${error instanceof Error ? error.message : String(error)}\n请确认实例正在运行。`, true);
     }
   }
 
-  pane.querySelector('#browser-reload')?.addEventListener('click', () => void load());
+
   // The pane is narrower than the guest desktop, so noVNC scales the 1080p frame
   // down; hiding the chrome gives it the whole window (and Esc restores it).
   const toggleFull = (on: boolean): void => {
     document.body.classList.toggle('browser-focus', on);
-    const button = pane.querySelector<HTMLElement>('#browser-full');
-    if (button) button.textContent = on ? '退出全屏' : '全屏';
     window.setTimeout(() => (pane.querySelector('webview') as unknown as { focus?: () => void } | null)?.focus?.(), 150);
   };
-  pane.querySelector('#browser-full')?.addEventListener('click', () => {
-    toggleFull(!document.body.classList.contains('browser-focus'));
-  });
+
   const onKey = (event: KeyboardEvent): void => {
     if (event.key === 'Escape' && document.body.classList.contains('browser-focus')) toggleFull(false);
   };
   document.addEventListener('keydown', onKey);
 
-  pane.querySelector('#browser-new')?.addEventListener('click', () => {
-    if (current) window.open(current, '_blank');
-  });
+
 
   document.body.classList.remove('browser-focus');
   void load();
 
   return {
     reload: () => void load(),
+    openExternal: () => {
+      if (current) window.open(current, '_blank');
+    },
+    toggleFullscreen: () => toggleFull(!document.body.classList.contains('browser-focus')),
+    url: () => current ?? '',
     destroy: () => {
       loadSeq++;
       document.removeEventListener('keydown', onKey);

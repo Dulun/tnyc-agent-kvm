@@ -141,7 +141,7 @@ function mountShell(): void {
         </div>
       </aside>
       <main class="main">
-        <header class="topbar"><h1 id="view-title">工作台</h1></header>
+        <header class="topbar"><h1 id="view-title">工作台</h1><div class="topbar-actions" id="topbar-actions"></div></header>
         <div class="banner" id="banner" hidden></div>
         <div class="content" id="content">
           <section class="view" id="view-workbench"></section>
@@ -306,10 +306,24 @@ function mountShell(): void {
 let refreshSessionProfile: () => Promise<void> = async () => {};
 let renderTerminalsHook: (tabs: Array<{ id: string; title: string; active: boolean; exited: boolean }>) => void = () => {};
 
+/** Create the terminal pane if needed; never opens a tab by itself. */
+function ensureTerminal(): TerminalTabs | null {
+  if (!api || !viewEls) return null;
+  if (!term) {
+    term = new TerminalTabs(api, viewEls.ssh);
+    term.onChange = (tabs) => renderTerminalsHook(tabs);
+  }
+  return term;
+}
+
+/**
+ * The only place a tab is opened. `setView('ssh')` just reveals the pane, so
+ * opening a tab here can never race with a second open from the view switch.
+ */
 async function newTerminal(session?: string): Promise<void> {
   setView('ssh');
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  if (term) await term.open(session);
+  await ensureTerminal()?.open(session);
 }
 
 function setView(next: View): void {
@@ -323,18 +337,36 @@ function setView(next: View): void {
     button.classList.toggle('active', button.dataset.view === next);
   }
 
-  if (next === 'ssh' && !term && api) {
-    if (viewEls) {
-      term = new TerminalTabs(api, viewEls.ssh);
-      term.onChange = (tabs) => renderTerminalsHook(tabs);
-      // Plain shell, no tmux: tmux paints on the alternate screen, which leaves
-      // xterm with zero scrollback and makes the wheel dead. A plain shell keeps
-      // history in the client, which is what makes scrolling work.
-      void term.open();
-    }
+  if (next === 'ssh') {
+    // Creating the pane is not the same as opening a session: switching to the
+    // view only reattaches the existing pane, so a click can't spawn two tabs.
+    const tabs = ensureTerminal();
+    if (tabs && tabs.list().length === 0) void tabs.open();
   }
   if (next === 'browser' && !browserPane && api) {
     if (viewEls) browserPane = mountBrowser(api, viewEls.browser);
+  }
+  // The guest desktop is 1:1 with the pane, so its toolbar lives in the app
+  // header instead of stealing a row from the picture.
+  const actions = document.getElementById('topbar-actions');
+  if (actions) {
+    actions.replaceChildren();
+    if (next === 'browser' && browserPane) {
+      const mk = (text: string, title: string, onClick: () => void): HTMLButtonElement => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'ghost';
+        button.textContent = text;
+        button.title = title;
+        button.addEventListener('click', onClick);
+        return button;
+      };
+      actions.append(
+        mk('重载', browserPane.url() || '访客桌面', () => browserPane?.reload()),
+        mk('全屏', '隐藏侧栏与标题，画面 1:1', () => browserPane?.toggleFullscreen()),
+        mk('新窗口', '在系统浏览器打开', () => browserPane?.openExternal()),
+      );
+    }
   }
   if (next === 'settings') openSettingsView();
   else if (settingsCleanup) {

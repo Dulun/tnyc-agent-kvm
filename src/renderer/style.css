@@ -371,3 +371,7 @@ body.browser-focus .browser-body webview { border-radius: 0; border: 0; height: 
 
 .modal-input { width: 100%; height: 34px; margin-top: 12px; padding: 0 10px; font-size: 13px; border: 1px solid var(--border); border-radius: 8px; }
 .modal-buttons { display: inline-flex; gap: 8px; }
+
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.browser-view { padding: 0 !important; }
+.browser-view .browser-body { margin: 0; border-radius: 0 0 12px 12px; border-top: 0; }
