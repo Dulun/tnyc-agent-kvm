@@ -91,6 +91,15 @@ Four independent layers, each fail-closed:
 
 See `docs/security.md` for the threat model and its limits.
 
+## macOS notes
+
+- macOS 15+ asks for **Local Network** permission on first SSH connect. An unsigned build gets
+  denied silently and every LAN connection fails with `EHOSTUNREACH` (Tailscale addresses still work).
+  `npm run pack:mac` ad-hoc signs the bundle, which makes the prompt appear; approve it under
+  System Settings → Privacy & Security → Local Network.
+- Distribution builds need a Developer ID certificate and notarisation; the ad-hoc signature is
+  only for local use.
+
 ## Verified against a live host
 
 Tested 2026-11-19 on macOS (Electron 33) against an Ubuntu 26.04 host with libvirt 12 / QEMU 10.2,

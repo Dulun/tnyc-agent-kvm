@@ -10,7 +10,8 @@
     "build": "node build.mjs",
     "start": "electron build/main/index.cjs",
     "typecheck": "tsc --noEmit",
-    "dist": "node build.mjs && electron-builder"
+    "dist": "node build.mjs && electron-builder",
+    "pack:mac": "node build.mjs && electron-builder --mac --dir && codesign --force --deep --sign - \"release/mac-arm64/TNYC Agent KVM.app\""
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
