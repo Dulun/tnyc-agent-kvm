@@ -2,13 +2,9 @@ import type { AppApi, TunnelInfo } from '../shared/ipc';
 
 export interface BrowserPane {
   reload(): void;
-  toggle(): void;
   destroy(): void;
 }
 
-const RATIO_KEY = 'tnyc.splitRatio';
-const COLLAPSED_KEY = 'tnyc.browserCollapsed';
-const DEFAULT_RATIO = 0.6;
 const NOVNC_PORT = 6080;
 
 /** noVNC is served by the guest's websockify; the tunnel gives us a local address. */
@@ -21,20 +17,17 @@ function noVncUrl(raw: string): string {
   return url.toString();
 }
 
-export function mountBrowser(app: AppApi, pane: HTMLElement, split: HTMLElement, onSplit: () => void): BrowserPane {
+export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
   pane.innerHTML = `
-    <button type="button" class="browser-rail" id="browser-rail" title="展开浏览器">浏览器</button>
-    <div class="browser-head">
-      <span class="title">访客桌面</span>
+    <div class="browser-toolbar">
       <span class="url" id="browser-url">未连接</span>
-      <button type="button" id="browser-reload" title="重新连接">重载</button>
-      <button type="button" id="browser-collapse" title="折叠">折叠</button>
+      <button type="button" class="ghost" id="browser-reload">重载</button>
+      <button type="button" class="ghost" id="browser-new">新窗口</button>
     </div>
     <div class="browser-body">
-      <div class="browser-overlay" id="browser-overlay"><div class="msg">正在打开访客桌面…</div></div>
+      <div class="browser-overlay" id="browser-overlay"></div>
     </div>`;
 
-  const splitter = split.querySelector<HTMLElement>('.splitter');
   const body = pane.querySelector<HTMLElement>('.browser-body');
   const overlay = pane.querySelector<HTMLElement>('#browser-overlay');
   const urlLabel = pane.querySelector<HTMLElement>('#browser-url');
@@ -43,24 +36,15 @@ export function mountBrowser(app: AppApi, pane: HTMLElement, split: HTMLElement,
   const overlayEl = overlay;
   const urlLabelEl = urlLabel;
 
-  let ratio = Number(localStorage.getItem(RATIO_KEY)) || DEFAULT_RATIO;
-  ratio = Math.min(0.85, Math.max(0.2, ratio));
-  let collapsed = localStorage.getItem(COLLAPSED_KEY) === '1';
   let tunnel: TunnelInfo | null = null;
+  let current: string | null = null;
   let loadSeq = 0;
-
-  const apply = (): void => {
-    split.classList.toggle('browser-collapsed', collapsed);
-    split.style.gridTemplateColumns = `${ratio}fr 5px ${1 - ratio}fr`;
-    onSplit();
-  };
 
   const showOverlay = (message: string, retry = false): void => {
     overlayEl.hidden = false;
-    overlayEl.replaceChildren();
-    overlayEl.append(Object.assign(document.createElement('div'), { className: 'msg', textContent: message }));
+    overlayEl.replaceChildren(Object.assign(document.createElement('div'), { className: 'msg', textContent: message }));
     if (retry) {
-      const button = Object.assign(document.createElement('button'), { textContent: '重试' });
+      const button = Object.assign(document.createElement('button'), { className: 'ghost', textContent: '重试' });
       button.addEventListener('click', () => void load());
       overlayEl.append(button);
     }
@@ -78,7 +62,9 @@ export function mountBrowser(app: AppApi, pane: HTMLElement, split: HTMLElement,
         return;
       }
       const src = noVncUrl(tunnel.url);
+      current = src;
       urlLabelEl.textContent = src;
+      urlLabelEl.title = src;
       const frame = document.createElement('iframe');
       frame.title = '访客桌面';
       frame.setAttribute('allow', 'clipboard-read; clipboard-write');
@@ -90,60 +76,25 @@ export function mountBrowser(app: AppApi, pane: HTMLElement, split: HTMLElement,
       bodyEl.append(frame);
     } catch (error) {
       if (seq !== loadSeq) return;
+      current = null;
       urlLabelEl.textContent = '连接失败';
+      urlLabelEl.title = '';
       showOverlay(`无法打开访客桌面：${error instanceof Error ? error.message : String(error)}\n请确认实例正在运行。`, true);
     }
   }
 
   pane.querySelector('#browser-reload')?.addEventListener('click', () => void load());
-  pane.querySelector('#browser-collapse')?.addEventListener('click', () => {
-    collapsed = true;
-    localStorage.setItem(COLLAPSED_KEY, '1');
-    apply();
-  });
-  pane.querySelector('#browser-rail')?.addEventListener('click', () => {
-    collapsed = false;
-    localStorage.setItem(COLLAPSED_KEY, '0');
-    apply();
+  pane.querySelector('#browser-new')?.addEventListener('click', () => {
+    if (current) window.open(current, '_blank');
   });
 
-  let dragRect: DOMRect | null = null;
-  const onMove = (event: PointerEvent): void => {
-    if (!dragRect) return;
-    ratio = Math.min(0.85, Math.max(0.2, (event.clientX - dragRect.left) / dragRect.width));
-    apply();
-  };
-  const onUp = (): void => {
-    if (!dragRect) return;
-    dragRect = null;
-    splitter?.classList.remove('dragging');
-    localStorage.setItem(RATIO_KEY, String(ratio));
-    window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', onUp);
-  };
-  splitter?.addEventListener('pointerdown', (event) => {
-    if (collapsed) return;
-    event.preventDefault();
-    dragRect = split.getBoundingClientRect();
-    splitter.classList.add('dragging');
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  });
-
-  apply();
   void load();
 
   return {
     reload: () => void load(),
-    toggle: () => {
-      collapsed = !collapsed;
-      localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
-      apply();
-    },
     destroy: () => {
       loadSeq++;
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
+      bodyEl.querySelector('iframe')?.remove();
       if (tunnel) void app.closeTunnel(tunnel.url).catch(() => undefined);
     },
   };

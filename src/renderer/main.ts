@@ -2,13 +2,20 @@ import '@xterm/xterm/css/xterm.css';
 import type { AppApi, HostTarget } from '../shared/ipc';
 import type { HostStatus } from '../shared/rpc';
 import { renderWizard } from './wizard';
-import { renderStatusBar } from './status';
+import { renderFooter } from './status';
 import { TerminalTabs } from './terminal';
 import { mountBrowser, type BrowserPane } from './browser';
-import { openSettings } from './settings';
+import { mountSettings } from './settings';
+import { icon } from './icons';
 
 const TARGET_KEY = 'tnyc.target';
+const SIDEBAR_KEY = 'tnyc.sidebarCollapsed';
+const PROJECT_KEY = 'tnyc.projectName';
 const LOCK_TEXT = /lock|locked|busy|in use|maintenance|另一台客户端|另一个客户端|占用|维护/i;
+
+type View = 'workbench' | 'browser' | 'ssh' | 'settings';
+const VIEWS: View[] = ['workbench', 'browser', 'ssh', 'settings'];
+const TITLES: Record<View, string> = { workbench: '工作台', browser: '浏览器', ssh: 'SSH', settings: '设置' };
 
 const found = document.getElementById('app');
 if (!found) throw new Error('missing #app');
@@ -22,12 +29,25 @@ let target: HostTarget | null = null;
 let status: HostStatus | null = null;
 let maintenance: string | null = null;
 let busy = false;
-let error: string | null = null;
-let statusbar: HTMLElement | null = null;
+let checking = false;
+let errorMessage: string | null = null;
+let view: View = 'workbench';
+
+let shellEl: HTMLElement | null = null;
+let titleEl: HTMLElement | null = null;
+let bannerEl: HTMLElement | null = null;
+let healthEl: HTMLElement | null = null;
+let footerEl: HTMLElement | null = null;
+let navEl: HTMLElement | null = null;
+let viewEls: Record<View, HTMLElement> | null = null;
+
 let term: TerminalTabs | null = null;
 let browserPane: BrowserPane | null = null;
+let settingsCleanup: (() => void) | null = null;
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const esc = (value: string): string =>
+  value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
 
 function readJump(value: unknown): HostTarget['jump'] {
   if (!Array.isArray(value)) return undefined;
@@ -74,14 +94,7 @@ function loadTarget(): HostTarget | null {
 }
 
 function isHostStatus(data: unknown): data is HostStatus {
-  return (
-    !!data &&
-    typeof data === 'object' &&
-    'instances' in data &&
-    Array.isArray(data.instances) &&
-    'proxy' in data &&
-    'relay' in data
-  );
+  return !!data && typeof data === 'object' && 'instances' in data && Array.isArray(data.instances) && 'proxy' in data && 'relay' in data;
 }
 
 function lockReason(data: unknown): string {
@@ -93,54 +106,219 @@ function lockReason(data: unknown): string {
   return '另一个客户端正在操作实例';
 }
 
+function el<T extends HTMLElement>(node: ParentNode, selector: string): T {
+  const hit = node.querySelector<T>(selector);
+  if (!hit) throw new Error(`missing ${selector}`);
+  return hit;
+}
+
+/* ---------- shell ---------- */
+
+function mountShell(): void {
+  const project = localStorage.getItem(PROJECT_KEY) || '默认工作区';
+  const initial = (target?.username.trim()[0] ?? '本').toUpperCase();
+
+  root.innerHTML = `
+    <div class="shell" id="shell">
+      <aside class="sidebar">
+        <div class="sb-head">
+          <span class="mark">${icon('logo', 20)}</span>
+          <span class="brand">tnyc-agent-kvm</span>
+          <button type="button" class="icon-btn" id="panel-toggle" title="收起侧栏" aria-label="收起侧栏">${icon('panel', 16)}</button>
+        </div>
+        <nav class="nav" id="nav">
+          <button type="button" class="nav-item" data-view="workbench">${icon('home', 16)}<span>工作台</span></button>
+          <button type="button" class="nav-item" data-view="browser">${icon('globe', 16)}<span>浏览器</span></button>
+          <button type="button" class="nav-item" data-view="ssh">${icon('server', 16)}<span>SSH</span></button>
+        </nav>
+        <div class="sb-section"><span>项目</span><button type="button" class="icon-btn" id="project-add" title="新建项目" aria-label="新建项目">${icon('plus', 14)}</button></div>
+        <div class="project-row">
+          ${icon('folder', 16)}
+          <span class="project-name" id="project-name"></span>
+          <button type="button" class="icon-btn" id="project-rename" title="重命名" aria-label="重命名">${icon('pencil', 14)}</button>
+          <button type="button" class="icon-btn" id="project-trash" title="删除项目" aria-label="删除项目">${icon('trash', 14)}</button>
+        </div>
+        <div class="sb-spacer"></div>
+        <div class="health" id="health"></div>
+        <div class="user-card">
+          <span class="avatar">${esc(initial)}</span>
+          <span class="user-text"><b>本机账户</b><small>远程主机</small></span>
+          <button type="button" class="icon-btn" id="open-settings" title="设置" aria-label="设置">${icon('gear', 16)}</button>
+        </div>
+      </aside>
+      <main class="main">
+        <header class="topbar"><h1 id="view-title">工作台</h1></header>
+        <div class="banner" id="banner" hidden></div>
+        <div class="content" id="content">
+          <section class="view" id="view-workbench"></section>
+          <section class="view browser-view" id="view-browser" hidden></section>
+          <section class="view term-pane" id="view-ssh" hidden></section>
+          <section class="view" id="view-settings" hidden></section>
+        </div>
+      </main>
+      <footer class="footer" id="footer"></footer>
+    </div>`;
+
+  shellEl = el(root, '#shell');
+  titleEl = el(root, '#view-title');
+  bannerEl = el(root, '#banner');
+  healthEl = el(root, '#health');
+  footerEl = el(root, '#footer');
+  navEl = el(root, '#nav');
+  viewEls = {
+    workbench: el(root, '#view-workbench'),
+    browser: el(root, '#view-browser'),
+    ssh: el(root, '#view-ssh'),
+    settings: el(root, '#view-settings'),
+  };
+
+  const nameEl = el<HTMLElement>(root, '#project-name');
+  nameEl.textContent = project;
+
+  const applyCollapse = (collapsed: boolean): void => {
+    shellEl?.classList.toggle('collapsed', collapsed);
+    localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0');
+    term?.fitNow();
+  };
+  applyCollapse(localStorage.getItem(SIDEBAR_KEY) === '1');
+
+  el(root, '#panel-toggle').addEventListener('click', () => {
+    applyCollapse(!shellEl?.classList.contains('collapsed'));
+  });
+
+  navEl.addEventListener('click', (event) => {
+    const button = (event.target as Element | null)?.closest<HTMLElement>('[data-view]');
+    const next = button?.dataset.view;
+    if (next && (VIEWS as string[]).includes(next)) setView(next as View);
+  });
+
+  el(root, '#open-settings').addEventListener('click', () => setView('settings'));
+
+  el(root, '#project-add').addEventListener('click', () => undefined);
+  el(root, '#project-rename').addEventListener('click', () => {
+    const next = window.prompt('重命名项目', nameEl.textContent ?? '');
+    if (!next?.trim()) return;
+    nameEl.textContent = next.trim();
+    localStorage.setItem(PROJECT_KEY, next.trim());
+  });
+  el(root, '#project-trash').addEventListener('click', () => {
+    window.confirm(`删除项目「${nameEl.textContent ?? ''}」？`);
+  });
+}
+
+function setView(next: View): void {
+  view = next;
+  if (titleEl) titleEl.textContent = TITLES[next];
+  if (viewEls) for (const key of VIEWS) viewEls[key].hidden = key !== next;
+  for (const button of navEl?.querySelectorAll<HTMLElement>('[data-view]') ?? []) {
+    button.classList.toggle('active', button.dataset.view === next);
+  }
+
+  if (next === 'ssh' && !term && api) {
+    if (viewEls) {
+      term = new TerminalTabs(api, viewEls.ssh);
+      void term.open('cage');
+    }
+  }
+  if (next === 'browser' && !browserPane && api) {
+    if (viewEls) browserPane = mountBrowser(api, viewEls.browser);
+  }
+  if (next === 'settings') openSettingsView();
+  else if (settingsCleanup) {
+    settingsCleanup();
+    settingsCleanup = null;
+    viewEls?.settings.replaceChildren();
+  }
+  if (next === 'workbench') renderWorkbench();
+  if (next === 'ssh') requestAnimationFrame(() => term?.fitNow());
+  paint();
+}
+
+/* ---------- rendering ---------- */
+
 function paint(): void {
-  if (!status || !statusbar) return;
-  renderStatusBar(
-    statusbar,
-    { target, status, maintenance, busy, error },
+  paintHealth();
+  paintBanner();
+  if (!status || !footerEl) return;
+  renderFooter(
+    footerEl,
+    { status, maintenance: maintenance !== null, busy, checking },
     {
+      onRefresh: () => void refresh(true),
+      onCheck: () => void runCheck(),
       onStart: () => void runInstance('start'),
       onStop: () => void runInstance('stop'),
-      onRefresh: () => void refresh(true),
-      onSettings: openSettingsModal,
     },
   );
+  if (view === 'workbench') renderWorkbench();
 }
 
-async function refresh(clearError = false): Promise<void> {
-  if (clearError) error = null;
-  try {
-    status = await api.status();
-  } catch (failure) {
-    error = messageOf(failure);
-  }
-  paint();
+function paintHealth(): void {
+  if (!healthEl || !status) return;
+  const running = status.instances[0]?.state === 'running';
+  healthEl.innerHTML = `<span class="dot ${running ? 'ok' : 'bad'}"></span><span>${running ? '环境运行正常' : '环境不可用'}</span><span class="health-shield">${icon('shield', 14)}</span>`;
 }
 
-async function runInstance(action: 'start' | 'stop'): Promise<void> {
-  if (!status || busy) return;
-  const instance = status.instances[0];
-  if (!instance) return;
-  busy = true;
-  error = null;
-  paint();
-  try {
-    if (action === 'start') await api.instanceStart(instance.id);
-    else await api.instanceStop(instance.id);
-    maintenance = null;
-  } catch (failure) {
-    const message = messageOf(failure);
-    if (LOCK_TEXT.test(message)) maintenance = message;
-    else error = message;
-  } finally {
-    busy = false;
-    await refresh();
-  }
+function paintBanner(): void {
+  if (!bannerEl) return;
+  const text = maintenance !== null ? `维护中 — ${maintenance}。启动/停止已禁用。` : errorMessage;
+  bannerEl.hidden = !text;
+  bannerEl.textContent = text ?? '';
 }
 
-function openSettingsModal(): void {
-  if (!status || !api) return;
-  openSettings({
+function checkList(check: HostStatus['lastCheck']): string {
+  if (!check) return '';
+  return check.items
+    .map(
+      (item) =>
+        `<div class="ci"><span class="dot ${item.ok ? 'ok' : 'bad'}"></span><span>${esc(item.name)}</span><span class="detail">${esc(item.detail)}</span></div>`,
+    )
+    .join('');
+}
+
+function renderWorkbench(): void {
+  if (!status || !viewEls) return;
+  const check = status.lastCheck;
+  const pass = check?.ok === true;
+  const running = status.instances[0]?.state === 'running';
+  const checkText = !check ? '尚未运行泄漏检查' : check.ok ? '网络检查通过' : '网络检查未通过';
+  const user = target?.username ?? status.hostname;
+  const host = target?.host ?? status.hostname;
+
+  viewEls.workbench.innerHTML = `
+    <div class="workbench">
+      <div class="wb-logo">${icon('logo', 28)}</div>
+      <h1>环境已就绪</h1>
+      <p class="wb-sub">已连接 ${esc(user)}@${esc(host)}，${checkText}。可以浏览网页或打开终端。</p>
+      <div class="card wb-card">
+        <div class="wb-row">
+          <span class="wb-icon">${icon('shield', 18)}</span>
+          <span class="wb-row-text"><b>隔离环境</b><small>${running ? '运行中' : '已停止'}</small></span>
+        </div>
+        <div class="wb-row">
+          <span class="dot ${pass ? 'ok' : 'bad'}"></span>
+          <span class="wb-row-text"><b>${pass ? '外网已放行' : '网络未通过'}</b></span>
+          <button type="button" class="primary" id="wb-new-term">新建终端</button>
+        </div>
+      </div>
+      <div class="wb-actions">
+        <button type="button" class="ghost" id="wb-check" ${checking ? 'disabled' : ''}>${checking ? '检查中…' : '运行泄漏检查'}</button>
+        <button type="button" class="ghost" id="wb-browser">打开浏览器</button>
+      </div>
+      <div class="wb-check">${checkList(check)}</div>
+      <p class="wb-hint">打开终端后输入 claude 开始工作。所有流量只经过所选节点，不提供直连开关。</p>
+    </div>`;
+
+  viewEls.workbench.querySelector('#wb-new-term')?.addEventListener('click', () => setView('ssh'));
+  viewEls.workbench.querySelector('#wb-browser')?.addEventListener('click', () => setView('browser'));
+  viewEls.workbench.querySelector('#wb-check')?.addEventListener('click', () => void runCheck());
+}
+
+function openSettingsView(): void {
+  if (!status || !api || !viewEls) return;
+  settingsCleanup?.();
+  viewEls.settings.replaceChildren();
+  settingsCleanup = mountSettings(viewEls.settings, {
     app: api,
     target,
     status,
@@ -155,6 +333,60 @@ function openSettingsModal(): void {
     },
   });
 }
+
+/* ---------- actions ---------- */
+
+async function refresh(clearError = false): Promise<void> {
+  if (clearError) errorMessage = null;
+  try {
+    status = await api.status();
+  } catch (failure) {
+    errorMessage = messageOf(failure);
+  }
+  paint();
+}
+
+async function runCheck(): Promise<void> {
+  if (checking) return;
+  checking = true;
+  errorMessage = null;
+  paint();
+  try {
+    const result = await api.checkRun();
+    if (status) status = { ...status, lastCheck: result };
+    await refresh();
+  } catch (failure) {
+    errorMessage = messageOf(failure);
+    paint();
+  } finally {
+    checking = false;
+    paint();
+  }
+}
+
+async function runInstance(action: 'start' | 'stop'): Promise<void> {
+  if (!status || busy) return;
+  const instance = status.instances[0];
+  if (!instance) return;
+  if (action === 'stop' && !window.confirm(`停止实例「${instance.name}」？实例内所有会话都会结束。`)) return;
+  busy = true;
+  errorMessage = null;
+  paint();
+  try {
+    if (action === 'start') await api.instanceStart(instance.id);
+    else await api.instanceStop(instance.id);
+    maintenance = null;
+  } catch (failure) {
+    const message = messageOf(failure);
+    if (LOCK_TEXT.test(message)) maintenance = message;
+    else errorMessage = message;
+  } finally {
+    busy = false;
+    await refresh();
+  }
+}
+
+/* ---------- lifecycle ---------- */
 
 function handleEvent(event: string, data: unknown): void {
   const lower = event.toLowerCase();
@@ -174,30 +406,11 @@ function showWorkbench(initial: HostStatus): void {
   status = initial;
   maintenance = null;
   busy = false;
-  error = null;
-  root.innerHTML = `
-    <div class="workbench">
-      <header class="statusbar" id="statusbar"></header>
-      <main class="split" id="split">
-        <section class="pane term-pane" id="term-pane"></section>
-        <div class="splitter" id="splitter" role="separator" aria-orientation="vertical"></div>
-        <aside class="pane browser-pane" id="browser-pane"></aside>
-      </main>
-    </div>`;
-
-  const byId = <T extends HTMLElement>(id: string): T => {
-    const element = root.querySelector<T>(`#${id}`);
-    if (!element) throw new Error(`missing #${id}`);
-    return element;
-  };
-  statusbar = byId('statusbar');
-  const split = byId('split');
-
-  term = new TerminalTabs(api, byId('term-pane'));
-  browserPane = mountBrowser(api, byId('browser-pane'), split, () => term?.fitNow());
-
+  checking = false;
+  errorMessage = null;
+  mountShell();
+  setView('workbench');
   paint();
-  void term.open('cage');
 }
 
 async function boot(): Promise<void> {

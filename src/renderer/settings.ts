@@ -35,13 +35,11 @@ function isProxyStep(data: unknown): data is ProxyStepEvent {
   return typeof step === 'string' && STEP_LABELS.has(step as ProxyStep);
 }
 
-export function openSettings(ctx: SettingsContext): void {
+/** Renders the settings cards; returns a cleanup for the event subscription. */
+export function mountSettings(root: HTMLElement, ctx: SettingsContext): () => void {
   const { app, target, status } = ctx;
   const instance = status.instances[0];
   const instanceName = instance?.name ?? '';
-
-  const modalRoot = document.getElementById('modal-root');
-  if (!modalRoot) return;
 
   const kv: [string, string][] = [
     ['主机', status.hostname],
@@ -53,72 +51,64 @@ export function openSettings(ctx: SettingsContext): void {
   ];
 
   const proxyNode = status.node ?? status.proxy.node ?? '';
-  const exitIp = status.proxy.exitIp ?? '—';
+  const exitIp = status.proxy.exitIp ?? '';
 
-  modalRoot.innerHTML = `
-    <div class="modal-backdrop" id="settings-backdrop">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <div class="modal-head">
-          <h2 id="settings-title">连接设置</h2>
-          <button type="button" class="ghost" id="settings-close">关闭</button>
-        </div>
-        <div class="modal-body">
-          <dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
-          <p class="hint">当前节点：<code>${esc(proxyNode || '—')}</code> · 出口：<code>${esc(exitIp)}</code></p>
+  root.innerHTML = `
+    <div class="settings">
+      <section class="card">
+        <h2>主机信息</h2>
+        <dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+      </section>
 
-          <section class="dns-section">
-            <h3>DNS 模式</h3>
-            <p class="dns-caution">切换会重启 mihomo，客机网络中断数秒，现有连接会断开；无需关机</p>
-            <label class="radio-row">
-              <input type="radio" name="dns-mode" value="fake-ip" />
-              <span class="radio-body"><b>fake-ip（默认）</b><span class="radio-desc">解析结果在客机内显示为 198.18.x，速度最快；某些本地脚本能看出用了代理</span></span>
-            </label>
-            <label class="radio-row">
-              <input type="radio" name="dns-mode" value="redir-host" />
-              <span class="radio-body"><b>redir-host</b><span class="radio-desc">返回真实解析结果，客机内看不出 fake-ip 痕迹；首次解析略慢，个别 CDN 走向可能变化</span></span>
-            </label>
-            <div class="form-error" id="dns-error" hidden></div>
-          </section>
+      <section class="card">
+        <h2>节点</h2>
+        <p class="hint">当前节点：<code>${esc(proxyNode || '—')}</code>${exitIp ? ` · 出口：<code>${esc(exitIp)}</code>` : ''}</p>
+        <div><button type="button" class="ghost" id="open-danger">更换节点</button></div>
 
-          <button type="button" class="danger" id="open-danger">更换节点</button>
+        <section class="danger-panel" id="danger" hidden>
+          <h3>危险操作：更换代理节点</h3>
+          <p class="danger-warning">虚拟机将被关闭，随后以新节点重新启动。所有 tmux 会话（包括 <code>cage</code>）都会丢失，所有远端客户端会断开，需要重新连接。</p>
 
-          <section class="danger-panel" id="danger" hidden>
-            <h3>危险操作：更换代理节点</h3>
-            <ul>
-              <li>虚拟机将被关闭，随后以新节点重新启动。</li>
-              <li>所有 tmux 会话（包括 <code>cage</code>）都会丢失。</li>
-              <li>所有远端客户端会断开，需要重新连接。</li>
-            </ul>
+          <div class="field-row">
+            <label class="field"><span>节点名称</span><input id="node-name" autocomplete="off" spellcheck="false" placeholder="node-tokyo" /></label>
+            <label class="field"><span>端口</span><input id="node-port" type="number" value="443" /></label>
+          </div>
+          <label class="field"><span>服务器地址</span><input id="node-server" autocomplete="off" spellcheck="false" placeholder="vpn.example.com" /></label>
+          <label class="field"><span>密码</span><input id="node-password" type="password" autocomplete="off" /></label>
+          <label class="field"><span>SNI（可选）</span><input id="node-sni" autocomplete="off" spellcheck="false" /></label>
 
-            <div class="field-row">
-              <label class="field"><span>节点名称</span><input id="node-name" autocomplete="off" spellcheck="false" placeholder="node-tokyo" /></label>
-              <label class="field"><span>端口</span><input id="node-port" type="number" value="443" /></label>
-            </div>
-            <label class="field"><span>服务器地址</span><input id="node-server" autocomplete="off" spellcheck="false" placeholder="vpn.example.com" /></label>
-            <label class="field"><span>密码</span><input id="node-password" type="password" autocomplete="off" /></label>
-            <label class="field"><span>SNI（可选）</span><input id="node-sni" autocomplete="off" spellcheck="false" /></label>
+          <label class="field"><span>输入实例名称 <code>${esc(instanceName || '（无实例）')}</code> 以确认</span><input id="confirm-name" autocomplete="off" spellcheck="false" ${instanceName ? '' : 'disabled'} /></label>
 
-            <label>输入实例名称 <code>${esc(instanceName || '（无实例）')}</code> 以确认：</label>
-            <input id="confirm-name" autocomplete="off" spellcheck="false" ${instanceName ? '' : 'disabled'} />
+          <div class="danger-actions">
+            <button type="button" class="danger-btn" id="proxy-submit" disabled>确认更换节点</button>
+          </div>
+          <div id="proxy-result"></div>
+          <ul class="steps" id="steps">
+            ${PIPELINE.map(
+              ({ step, label }) =>
+                `<li data-step="${step}" data-state="pending"><span class="st">${STEP_ICON.pending}</span><span class="lbl">${label}</span><span class="detail"></span></li>`,
+            ).join('')}
+          </ul>
+          <div id="proxy-banner"></div>
+        </section>
+      </section>
 
-            <div class="danger-actions">
-              <button type="button" class="danger" id="proxy-submit" disabled>确认更换节点</button>
-            </div>
-            <div id="proxy-result"></div>
-            <ul class="steps" id="steps">
-              ${PIPELINE.map(
-                ({ step, label }) =>
-                  `<li data-step="${step}" data-state="pending"><span class="st">${STEP_ICON.pending}</span><span class="lbl">${label}</span><span class="detail"></span></li>`,
-              ).join('')}
-            </ul>
-            <div id="proxy-banner"></div>
-          </section>
-        </div>
-      </div>
+      <section class="card">
+        <h2>DNS 模式</h2>
+        <p class="dns-caution">切换会重启 mihomo，客机网络中断数秒，现有连接会断开；无需关机</p>
+        <label class="radio-row">
+          <input type="radio" name="dns-mode" value="fake-ip" />
+          <span class="radio-body"><b>fake-ip（默认）</b><span class="radio-desc">解析结果在客机内显示为 198.18.x，速度最快；某些本地脚本能看出用了代理</span></span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="dns-mode" value="redir-host" />
+          <span class="radio-body"><b>redir-host</b><span class="radio-desc">返回真实解析结果，客机内看不出 fake-ip 痕迹；首次解析略慢，个别 CDN 走向可能变化</span></span>
+        </label>
+        <div class="form-error" id="dns-error" hidden></div>
+      </section>
     </div>`;
 
-  const $ = <T extends HTMLElement>(selector: string): T | null => modalRoot.querySelector<T>(selector);
-  const backdrop = $<HTMLDivElement>('#settings-backdrop');
+  const $ = <T extends HTMLElement>(selector: string): T | null => root.querySelector<T>(selector);
   const danger = $<HTMLElement>('#danger');
   const confirmInput = $<HTMLInputElement>('#confirm-name');
   const submit = $<HTMLButtonElement>('#proxy-submit');
@@ -130,13 +120,13 @@ export function openSettings(ctx: SettingsContext): void {
   const nodePort = $<HTMLInputElement>('#node-port');
   const nodePassword = $<HTMLInputElement>('#node-password');
   const nodeSni = $<HTMLInputElement>('#node-sni');
-  if (!backdrop || !danger || !confirmInput || !submit || !steps || !banner || !result || !nodeName || !nodeServer || !nodePort || !nodePassword || !nodeSni) {
+  if (!danger || !confirmInput || !submit || !steps || !banner || !result || !nodeName || !nodeServer || !nodePort || !nodePassword || !nodeSni) {
     throw new Error('settings markup missing');
   }
   const stepsEl = steps;
   const submitBtn = submit;
 
-  const dnsRadios = [...modalRoot.querySelectorAll<HTMLInputElement>('input[name="dns-mode"]')];
+  const dnsRadios = [...root.querySelectorAll<HTMLInputElement>('input[name="dns-mode"]')];
   const dnsError = $<HTMLDivElement>('#dns-error');
   if (dnsRadios.length !== 2 || !dnsError) throw new Error('dns markup missing');
 
@@ -186,20 +176,6 @@ export function openSettings(ctx: SettingsContext): void {
   const unsubscribe = app.onEvent((_event, data) => {
     if (isProxyStep(data)) applyStep(data);
   });
-
-  const close = (): void => {
-    unsubscribe();
-    modalRoot.replaceChildren();
-    document.removeEventListener('keydown', onKey);
-  };
-  const onKey = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape') close();
-  };
-  document.addEventListener('keydown', onKey);
-  backdrop.addEventListener('mousedown', (event) => {
-    if (event.target === backdrop) close();
-  });
-  $<HTMLButtonElement>('#settings-close')?.addEventListener('click', close);
 
   $<HTMLButtonElement>('#open-danger')?.addEventListener('click', () => {
     danger.hidden = false;
@@ -322,4 +298,6 @@ export function openSettings(ctx: SettingsContext): void {
       }
     }
   });
+
+  return () => unsubscribe();
 }

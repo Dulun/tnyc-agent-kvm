@@ -14,6 +14,9 @@ extraResources:
 asar: true
 mac:
   category: public.app-category.developer-tools
+  extendInfo:
+    # macOS 15+ asks once; without the prompt a sandboxed/local-network connect fails with EHOSTUNREACH.
+    NSLocalNetworkUsageDescription: Connect to the Ubuntu host over your local network (SSH).
   target:
     - dmg
     - zip

@@ -90,10 +90,10 @@ export class TerminalTabs {
       cursorBlink: true,
       scrollback: 8000,
       theme: {
-        background: '#0b0e14',
+        background: '#1c1c1a',
         foreground: '#e6e9ef',
         cursor: '#5b8cff',
-        cursorAccent: '#0b0e14',
+        cursorAccent: '#1c1c1a',
         selectionBackground: '#2b3d66',
         black: '#11151f',
         brightBlack: '#5d6678',
@@ -229,6 +229,7 @@ export class TerminalTabs {
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'w') return;
     if (document.querySelector('.modal-backdrop')) return;
+    if (this.body.closest('[hidden]')) return;
     if (!this.active) return;
     event.preventDefault();
     event.stopPropagation();

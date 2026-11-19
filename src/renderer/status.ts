@@ -1,60 +1,50 @@
-import type { HostTarget } from '../shared/ipc';
 import type { HostStatus } from '../shared/rpc';
 
-export interface StatusView {
-  target: HostTarget | null;
+export interface FooterView {
   status: HostStatus;
   /** non-null while another client holds the instance lock */
-  maintenance: string | null;
+  maintenance: boolean;
   busy: boolean;
-  error: string | null;
+  checking: boolean;
 }
 
-export interface StatusHandlers {
+export interface FooterHandlers {
+  onRefresh(): void;
+  onCheck(): void;
   onStart(): void;
   onStop(): void;
-  onSettings(): void;
-  onRefresh(): void;
 }
 
 const esc = (v: string): string =>
   v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
 
-export function renderStatusBar(root: HTMLElement, view: StatusView, handlers: StatusHandlers): void {
-  const { status, maintenance, busy } = view;
-  const inst = status.instances[0];
-  const state = inst?.state ?? 'unknown';
-  const locked = maintenance !== null;
+export function renderFooter(root: HTMLElement, view: FooterView, handlers: FooterHandlers): void {
+  const { status } = view;
+  const instance = status.instances[0];
+  const running = instance?.state === 'running';
+  const pass = status.lastCheck?.ok === true;
+  const locked = view.maintenance || view.busy;
 
-  const check = status.lastCheck;
-  const checkClass = !check ? '' : check.ok ? 'ok' : 'bad';
-  const checkLabel = !check ? '泄漏检查 未检测' : check.ok ? '泄漏检查 通过' : '泄漏检查 失败';
-  const checkAt = check ? new Date(check.at).toLocaleTimeString('zh-CN', { hour12: false }) : '';
+  const badges = [
+    `<span class="fbadge"><span class="dot ${pass ? 'ok' : 'bad'}"></span>${pass ? '外网已放行' : '网络未通过'}</span>`,
+  ];
+  if (status.proxy.node) badges.push(`<span class="fbadge">节点 ${esc(status.proxy.node)}</span>`);
+  if (status.proxy.exitIp) badges.push(`<span class="fbadge">出口 ${esc(status.proxy.exitIp)}</span>`);
+  if (status.proxy.dnsMode) badges.push(`<span class="fbadge">DNS ${esc(status.proxy.dnsMode)}</span>`);
+  if (instance?.name) badges.push(`<span class="fbadge">${esc(instance.name)} · ${running ? '运行中' : '已停止'}</span>`);
 
   root.innerHTML = `
-    <span class="brand">tnyc-agent-kvm</span>
-    <span class="host-label">${esc(view.target?.label ?? status.hostname)}</span>
-    <span class="badge"><span class="dot ${status.relay.active ? 'ok' : ''}"></span>中继 <b>${status.relay.active ? '已启用' : '关闭'}</b>${
-      status.relay.active ? ` · ${status.relay.rules} 条规则` : ''
-    }</span>
-    <span class="badge">节点 <b>${esc(status.proxy.node ?? '—')}</b></span>
-    <span class="badge">出口 <b class="mono">${esc(status.proxy.exitIp ?? '—')}</b></span>
-    <span class="badge ${checkClass}" title="${esc(checkAt)}"><span class="dot ${checkClass}"></span>${checkLabel}${
-      status.proxy.enabled ? ' · 代理开' : ''
-    }</span>
-    <span class="spacer"></span>
-    <span class="badge">实例 <b>${esc(inst?.name ?? '未创建')}</b> · ${state === 'running' ? '运行中' : state === 'stopped' ? '已停止' : state === 'absent' ? '不存在' : '未知'}</span>
-    <span class="actions">
-      <button id="sb-start" ${state !== 'stopped' || locked || busy ? 'disabled' : ''}>启动</button>
-      <button id="sb-stop" ${state !== 'running' || locked || busy ? 'disabled' : ''}>停止</button>
-      <button id="sb-refresh" ${busy ? 'disabled' : ''} title="刷新状态">刷新</button>
-      <button id="sb-settings" class="primary">更换节点</button>
-    </span>
-    ${maintenance ? `<div class="maint-banner">维护中 — ${esc(maintenance)}。启动/停止已禁用。</div>` : ''}
-    ${view.error ? `<div class="status-error">${esc(view.error)}</div>` : ''}`;
+    <div class="fbadges">${badges.join('<span class="sep">│</span>')}</div>
+    <span class="fspacer"></span>
+    <div class="factions">
+      <button type="button" class="text-btn" id="ft-refresh" ${view.busy ? 'disabled' : ''}>刷新</button>
+      <button type="button" class="text-btn" id="ft-check" ${view.checking || view.busy ? 'disabled' : ''}>${view.checking ? '检查中…' : '运行检查'}</button>
+      ${instance && !running ? `<button type="button" class="text-btn" id="ft-start" ${locked ? 'disabled' : ''}>启动环境</button>` : ''}
+      <button type="button" class="text-btn" id="ft-stop" ${!running || locked ? 'disabled' : ''}>停止环境</button>
+    </div>`;
 
-  root.querySelector('#sb-start')?.addEventListener('click', handlers.onStart);
-  root.querySelector('#sb-stop')?.addEventListener('click', handlers.onStop);
-  root.querySelector('#sb-refresh')?.addEventListener('click', handlers.onRefresh);
-  root.querySelector('#sb-settings')?.addEventListener('click', handlers.onSettings);
+  root.querySelector('#ft-refresh')?.addEventListener('click', handlers.onRefresh);
+  root.querySelector('#ft-check')?.addEventListener('click', handlers.onCheck);
+  root.querySelector('#ft-start')?.addEventListener('click', handlers.onStart);
+  root.querySelector('#ft-stop')?.addEventListener('click', handlers.onStop);
 }
