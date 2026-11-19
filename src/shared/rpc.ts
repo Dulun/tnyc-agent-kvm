@@ -38,6 +38,7 @@ export type RpcMethod =
   | 'guest.bootstrap'
   | 'guest.exec'
   | 'guest.sessions'
+  | 'guest.sessionKill'
   | 'dns.get'
   | 'dns.set';
 
@@ -154,6 +155,10 @@ export interface GuestExecParams {
 export interface GuestExecResult {
   code: number;
   out: string;
+}
+
+export interface SessionKillParams {
+  name: string;
 }
 
 export interface TmuxSession {

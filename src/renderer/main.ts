@@ -210,15 +210,30 @@ function mountShell(): void {
       const sessions = await api.sessions();
       sessList.replaceChildren(
         ...sessions.map((session) => {
-          const row = document.createElement('button');
-          row.type = 'button';
+          const row = document.createElement('div');
           row.className = 'sess-row';
-          row.textContent = `tmux:${session.name}`;
           row.title = `${session.windows} 个窗口${session.attached ? ' · 已挂载' : ''}`;
-          row.addEventListener('click', () => {
-            setView('ssh');
-            void term?.open(session.name);
+          const label = document.createElement('button');
+          label.type = 'button';
+          label.className = 'sess-open';
+          label.textContent = session.name;
+          label.addEventListener('click', () => void newTerminal(session.name));
+          const kill = document.createElement('button');
+          kill.type = 'button';
+          kill.className = 'sess-kill';
+          kill.title = `删除会话 ${session.name}`;
+          kill.textContent = '×';
+          kill.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            if (!window.confirm(`删除终端会话「${session.name}」？其中的进程会被结束。`)) return;
+            try {
+              await api.sessionKill(session.name);
+              await refreshSessions();
+            } catch (error) {
+              window.alert(error instanceof Error ? error.message : String(error));
+            }
           });
+          row.append(label, kill);
           return row;
         }),
       );

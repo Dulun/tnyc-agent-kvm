@@ -59,6 +59,7 @@ export interface AppApi {
   proxySet(params: ProxySetParams): Promise<void>;
   dnsSet(mode: DnsMode): Promise<void>;
   sessions(): Promise<TmuxSession[]>;
+  sessionKill(name: string): Promise<void>;
   checkRun(params?: CheckParams): Promise<CheckResult>;
   guestExec(params: GuestExecParams): Promise<GuestExecResult>;
   guestBootstrap(): Promise<void>;
@@ -92,6 +93,7 @@ export const IPC = {
   proxySet: 'app:proxySet',
   dnsSet: 'app:dnsSet',
   sessions: 'app:sessions',
+  sessionKill: 'app:sessionKill',
   checkRun: 'app:checkRun',
   guestExec: 'app:guestExec',
   guestBootstrap: 'app:guestBootstrap',

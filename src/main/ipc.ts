@@ -50,6 +50,7 @@ const RPC_METHODS: Record<RpcMethod, true> = {
   'dns.get': true,
   'dns.set': true,
   'guest.sessions': true,
+  'guest.sessionKill': true,
 };
 
 /** Methods that legitimately run for minutes on the host; never time these out. */
@@ -60,6 +61,7 @@ const LONG_RUNNING: Record<string, true> = {
   'guest.bootstrap': true,
   'dns.set': true,
   'guest.sessions': true,
+  'guest.sessionKill': true,
 };
 
 function asInteger(value: unknown, name: string, min: number, max: number): number {
@@ -248,6 +250,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle(IPC.sessions, (): Promise<TmuxSession[]> => {
     return requireSession().rpc.request<TmuxSession[]>('guest.sessions');
+  });
+
+  ipcMain.handle(IPC.sessionKill, (_event, name: unknown): Promise<void> => {
+    if (typeof name !== 'string' || !/^[\w.-]+$/.test(name)) throw new Error('invalid session name');
+    return requireSession().rpc.request<void>('guest.sessionKill', { name });
   });
 
   ipcMain.handle(IPC.checkRun, (_event, raw: unknown): Promise<CheckResult> => {

@@ -346,6 +346,10 @@ body.browser-focus .browser-body,
 body.browser-focus .browser-body webview { border-radius: 0; border: 0; height: 100%; }
 
 .sess-list { display: flex; flex-direction: column; gap: 1px; padding: 0 6px 6px; }
-.sess-row { text-align: left; font-size: 12.5px; color: var(--text); padding: 6px 8px; border-radius: 7px; border: 0; background: transparent; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-row { display: flex; align-items: center; gap: 4px; border-radius: 7px; }
+.sess-open { flex: 1; min-width: 0; text-align: left; font-size: 12.5px; color: var(--text); padding: 6px 8px; border: 0; background: transparent; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-kill { flex: none; width: 18px; height: 18px; margin-right: 6px; border: 0; border-radius: 4px; background: transparent; color: #8a8a83; font-size: 13px; line-height: 1; opacity: 0; }
+.sess-row:hover .sess-kill { opacity: 1; }
+.sess-kill:hover { background: #eceae5; color: var(--bad); }
 .sess-row:hover { background: #efedea; }
 .sess-empty { font-size: 12px; color: #8a8a83; padding: 6px 8px; }

@@ -24,6 +24,7 @@ const api: AppApi = {
   proxySet: (params) => ipcRenderer.invoke(IPC.proxySet, params),
   dnsSet: (mode) => ipcRenderer.invoke(IPC.dnsSet, mode),
   sessions: () => ipcRenderer.invoke(IPC.sessions),
+  sessionKill: (name) => ipcRenderer.invoke(IPC.sessionKill, name),
   checkRun: (params) => ipcRenderer.invoke(IPC.checkRun, params),
   guestExec: (params) => ipcRenderer.invoke(IPC.guestExec, params),
   guestBootstrap: () => ipcRenderer.invoke(IPC.guestBootstrap),

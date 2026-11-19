@@ -52,6 +52,15 @@ const HANDLERS: Record<RpcMethod, Handler> = {
     }
     return {};
   },
+  'guest.sessionKill': async (params) => {
+    const name = (params as { name?: unknown } | undefined)?.name;
+    if (typeof name !== 'string' || !/^[\w.-]+$/.test(name)) throw new AgentError(ERR.params, 'session name is invalid');
+    const rec = await findInstance();
+    const vm = rec?.name ?? (await instanceList())[0]?.name ?? 'cage';
+    const res = await guestExec(vm, `tmux kill-session -t ${name}`, 20_000);
+    if (res.code !== 0) throw new AgentError(ERR.generic, `tmux kill-session failed: ${res.out.slice(-120)}`);
+    return {};
+  },
   'guest.sessions': async () => {
     const rec = await findInstance();
     const vm = rec?.name ?? (await instanceList())[0]?.name ?? 'cage';

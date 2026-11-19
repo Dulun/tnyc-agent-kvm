@@ -22,6 +22,8 @@ function readFontSize(): number {
 
 interface Tab {
   id: string;
+  /** tmux session this tab is attached to, if any */
+  session?: string;
   term: Terminal;
   host: HTMLDivElement;
   tabEl: HTMLDivElement;
@@ -109,6 +111,16 @@ export class TerminalTabs {
   }
 
   async open(session?: string): Promise<void> {
+    // Clicking the same session twice must focus the existing tab, not stack
+    // duplicate attaches of one tmux session.
+    if (session) {
+      for (const existing of this.tabs.values()) {
+        if (existing.session === session) {
+          this.activate(existing.id);
+          return;
+        }
+      }
+    }
     // Default tabs are a plain shell: tmux paints on the alternate screen, which
     // leaves xterm with no scrollback and makes the wheel dead. tmux is only used
     // when the caller explicitly attaches a named session.
@@ -188,7 +200,7 @@ export class TerminalTabs {
     });
     term.onData((data) => this.app.terminalWrite(handle.id, data));
 
-    const tab: Tab = { id: handle.id, term, host, tabEl, cols: 80, rows: 24, exited: false, refits: [] };
+    const tab: Tab = { id: handle.id, term, host, tabEl, cols: 80, rows: 24, exited: false, refits: [], ...(session ? { session } : {}) };
     this.tabs.set(handle.id, tab);
     this.body.append(host);
     term.open(host);
