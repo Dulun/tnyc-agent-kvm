@@ -43,8 +43,11 @@ fi
 
 # --- tmux -------------------------------------------------------------------
 cat >/root/.tmux.conf <<'EOF'
-set -g mouse on
+# Mouse mode would route the wheel into tmux copy-mode, where typing is silently
+# swallowed; the app's terminal handles scrolling locally instead.
+set -g mouse off
 set -g history-limit 50000
+set -g status off
 EOF
 chmod 0644 /root/.tmux.conf
 

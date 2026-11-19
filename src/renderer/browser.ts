@@ -22,6 +22,7 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
     <div class="browser-toolbar">
       <span class="url" id="browser-url">未连接</span>
       <button type="button" class="ghost" id="browser-reload">重载</button>
+      <button type="button" class="ghost" id="browser-full">全屏</button>
       <button type="button" class="ghost" id="browser-new">新窗口</button>
     </div>
     <div class="browser-body">
@@ -75,7 +76,10 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
         void (frame as unknown as { executeJavaScript(code: string): Promise<unknown> })
           .executeJavaScript(
             "document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';" +
-              "window.scrollTo(0,0);",
+              "window.scrollTo(0,0);" +
+              // noVNC's control bar overlaps the guest desktop at 1:1.
+              "for (const sel of ['#noVNC_control_bar','#noVNC_control_bar_anchor','#noVNC_status','#noVNC_power_button'])" +
+              "  for (const el of document.querySelectorAll(sel)) el.style.display='none';",
           )
           .catch(() => undefined);
       });
@@ -95,6 +99,22 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
   }
 
   pane.querySelector('#browser-reload')?.addEventListener('click', () => void load());
+  // The pane is narrower than the guest desktop, so noVNC scales the 1080p frame
+  // down; hiding the chrome gives it the whole window (and Esc restores it).
+  const toggleFull = (on: boolean): void => {
+    document.body.classList.toggle('browser-focus', on);
+    const button = pane.querySelector<HTMLElement>('#browser-full');
+    if (button) button.textContent = on ? '退出全屏' : '全屏';
+    window.setTimeout(() => (pane.querySelector('webview') as unknown as { focus?: () => void } | null)?.focus?.(), 150);
+  };
+  pane.querySelector('#browser-full')?.addEventListener('click', () => {
+    toggleFull(!document.body.classList.contains('browser-focus'));
+  });
+  const onKey = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape' && document.body.classList.contains('browser-focus')) toggleFull(false);
+  };
+  document.addEventListener('keydown', onKey);
+
   pane.querySelector('#browser-new')?.addEventListener('click', () => {
     if (current) window.open(current, '_blank');
   });
@@ -105,6 +125,8 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
     reload: () => void load(),
     destroy: () => {
       loadSeq++;
+      document.removeEventListener('keydown', onKey);
+      document.body.classList.remove('browser-focus');
       bodyEl.querySelector('webview')?.remove();
       if (tunnel) void app.closeTunnel(tunnel.url).catch(() => undefined);
     },
