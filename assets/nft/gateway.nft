@@ -65,8 +65,18 @@ table inet gw {
     iifname "eth1" icmpv6 type { echo-request, nd-neighbor-solicit, nd-neighbor-advert } counter accept
   }
 
+  # Egress pinning. Even if mihomo is flipped to DIRECT (or its rules are edited),
+  # the only packets this VM may originate are the tunnel to the node and replies
+  # towards the cage. Everything else dies in the kernel, so the exit can never
+  # silently become the domestic route.
   chain output {
-    type filter hook output priority filter; policy accept;
+    type filter hook output priority filter; policy drop;
+
+    oifname "lo" counter accept
+    ct state established,related counter accept
+    oifname "eth1" counter accept
+    ip6 daddr {{NODE_ADDR}} udp dport {{NODE_PORT}} counter accept
+    icmpv6 type { echo-request, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } counter accept
 
     # mihomo's controller can flip GLOBAL/DIRECT; keep it root-only.
     meta skuid != 0 tcp dport 11098 counter drop
