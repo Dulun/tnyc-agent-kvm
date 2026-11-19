@@ -28,7 +28,8 @@ export DEBIAN_FRONTEND=noninteractive
 # --- packages ---------------------------------------------------------------
 apt-get update -qq
 apt-get install -y --no-install-recommends \
-  tigervnc-standalone-server openbox novnc websockify tmux curl ca-certificates
+  tigervnc-standalone-server openbox novnc websockify tmux curl ca-certificates \
+  fonts-noto-color-emoji fonts-dejavu-core fonts-liberation
 
 # --- Google Chrome stable ---------------------------------------------------
 if ! command -v google-chrome >/dev/null 2>&1; then
@@ -54,6 +55,12 @@ set -g history-limit 50000
 set -g status off
 EOF
 chmod 0644 /root/.tmux.conf
+
+# --- fonts ----------------------------------------------------------------
+# A Linux desktop without a colour emoji font renders emoji as blank boxes,
+# which fingerprint tests score heavily ("emoji style"). Ship the real ones and
+# rebuild the font cache so Chrome sees them.
+fc-cache -f >/dev/null 2>&1 || true
 
 # --- browser launcher -------------------------------------------------------
 install -d -m 0700 "$CHROME_DIR"

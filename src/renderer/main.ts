@@ -10,7 +10,6 @@ import { icon } from './icons';
 
 const TARGET_KEY = 'tnyc.target';
 const SIDEBAR_KEY = 'tnyc.sidebarCollapsed';
-const PROJECT_KEY = 'tnyc.projectName';
 const LOCK_TEXT = /lock|locked|busy|in use|maintenance|另一台客户端|另一个客户端|占用|维护/i;
 
 type View = 'workbench' | 'browser' | 'ssh' | 'settings';
@@ -115,7 +114,6 @@ function el<T extends HTMLElement>(node: ParentNode, selector: string): T {
 /* ---------- shell ---------- */
 
 function mountShell(): void {
-  const project = localStorage.getItem(PROJECT_KEY) || '默认工作区';
   const initial = (target?.username.trim()[0] ?? '本').toUpperCase();
 
   root.innerHTML = `
@@ -131,13 +129,6 @@ function mountShell(): void {
           <button type="button" class="nav-item" data-view="browser">${icon('globe', 16)}<span>浏览器</span></button>
           <button type="button" class="nav-item" data-view="ssh">${icon('server', 16)}<span>SSH</span></button>
         </nav>
-        <div class="sb-section"><span>项目</span><button type="button" class="icon-btn" id="project-add" title="新建项目" aria-label="新建项目">${icon('plus', 14)}</button></div>
-        <div class="project-row">
-          ${icon('folder', 16)}
-          <span class="project-name" id="project-name"></span>
-          <button type="button" class="icon-btn" id="project-rename" title="重命名" aria-label="重命名">${icon('pencil', 14)}</button>
-          <button type="button" class="icon-btn" id="project-trash" title="删除项目" aria-label="删除项目">${icon('trash', 14)}</button>
-        </div>
         <div class="sb-section"><span>终端</span><button type="button" class="icon-btn" id="sess-refresh" title="刷新会话" aria-label="刷新会话">${icon('plus', 14)}</button></div>
         <div class="sess-list" id="sess-list"></div>
         <div class="sb-spacer"></div>
@@ -174,8 +165,6 @@ function mountShell(): void {
     settings: el(root, '#view-settings'),
   };
 
-  const nameEl = el<HTMLElement>(root, '#project-name');
-  nameEl.textContent = project;
 
   const applyCollapse = (collapsed: boolean): void => {
     shellEl?.classList.toggle('collapsed', collapsed);
@@ -196,13 +185,6 @@ function mountShell(): void {
 
   el(root, '#open-settings').addEventListener('click', () => setView('settings'));
 
-  el(root, '#project-add').addEventListener('click', () => undefined);
-  el(root, '#project-rename').addEventListener('click', () => {
-    const next = window.prompt('重命名项目', nameEl.textContent ?? '');
-    if (!next?.trim()) return;
-    nameEl.textContent = next.trim();
-    localStorage.setItem(PROJECT_KEY, next.trim());
-  });
   const sessList = el<HTMLElement>(root, '#sess-list');
   const refreshSessions = async (): Promise<void> => {
     if (!api) return;
@@ -251,18 +233,12 @@ function mountShell(): void {
   el(root, '#sess-refresh').addEventListener('click', () => void newTerminal());
   void refreshSessions();
   window.setInterval(() => void refreshSessions(), 20_000);
-
-  el(root, '#project-trash').addEventListener('click', () => {
-    window.confirm(`删除项目「${nameEl.textContent ?? ''}」？`);
-  });
 }
 
 let refreshSessionList: () => Promise<void> = async () => {};
 
 async function newTerminal(session?: string): Promise<void> {
   setView('ssh');
-  // setView only creates the pane; a new tab needs an explicit open, otherwise
-  // the button just re-focuses whatever terminal was already there.
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   if (term) await term.open(session);
   void refreshSessionList();
