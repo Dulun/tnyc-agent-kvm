@@ -61,6 +61,39 @@ const HANDLERS: Record<RpcMethod, Handler> = {
     if (res.code !== 0) throw new AgentError(ERR.generic, `tmux kill-session failed: ${res.out.slice(-120)}`);
     return {};
   },
+  'guest.sessionRename': async (params) => {
+    const { from, to } = (params ?? {}) as { from?: unknown; to?: unknown };
+    if (typeof from !== 'string' || typeof to !== 'string' || !/^[\w.-]+$/.test(from) || !/^[\w.-]+$/.test(to)) {
+      throw new AgentError(ERR.params, 'session names are invalid');
+    }
+    const res = await guestExec(await cageVm(), `tmux rename-session -t ${from} ${to}`, 20_000);
+    if (res.code !== 0) throw new AgentError(ERR.generic, `tmux rename-session failed: ${res.out.slice(-120)}`);
+    return {};
+  },
+  'browser.profiles': async () => {
+    const res = await guestExec(await cageVm(), 'cage-profile list; echo ---; cat /root/.cage-profile 2>/dev/null', 20_000);
+    const [list = '', current = ''] = res.out.split('---');
+    const profiles = list.split('\n').map((l) => l.trim()).filter(Boolean);
+    return { profiles, current: current.trim() || 'cage' };
+  },
+  'browser.useProfile': async (params) => {
+    const name = (params as { name?: unknown } | undefined)?.name;
+    if (typeof name !== 'string' || !/^[\w.-]{1,32}$/.test(name)) throw new AgentError(ERR.params, 'profile name is invalid');
+    const res = await guestExec(await cageVm(), `cage-profile use ${name}`, 180_000);
+    if (res.code !== 0) throw new AgentError(ERR.generic, `profile switch failed: ${res.out.slice(-200)}`);
+    return {};
+  },
+  'browser.renameProfile': async (params) => {
+    const { from, to } = (params ?? {}) as { from?: unknown; to?: unknown };
+    if (typeof from !== 'string' || typeof to !== 'string' || !/^[\w.-]{1,32}$/.test(from) || !/^[\w.-]{1,32}$/.test(to)) {
+      throw new AgentError(ERR.params, 'profile names are invalid');
+    }
+    const cmd = `test -d /root/.chrome-${from} && mv /root/.chrome-${from} /root/.chrome-${to}` +
+      ` && if [ "$(cat /root/.cage-profile 2>/dev/null)" = "${from}" ]; then echo "${to}" > /root/.cage-profile; systemctl restart cage-browser; fi`;
+    const res = await guestExec(await cageVm(), cmd, 180_000);
+    if (res.code !== 0) throw new AgentError(ERR.generic, `profile rename failed: ${res.out.slice(-200)}`);
+    return {};
+  },
   'guest.sessions': async () => {
     const rec = await findInstance();
     const vm = rec?.name ?? (await instanceList())[0]?.name ?? 'cage';
@@ -87,6 +120,11 @@ const HANDLERS: Record<RpcMethod, Handler> = {
 };
 
 /** State-changing methods run one at a time; a status poll never queues behind them. */
+async function cageVm(): Promise<string> {
+  const rec = await findInstance();
+  return rec?.name ?? (await instanceList())[0]?.name ?? 'cage';
+}
+
 const MUTATING: Partial<Record<RpcMethod, true>> = {
   'provision.run': true,
   'proxy.set': true,

@@ -39,6 +39,10 @@ export type RpcMethod =
   | 'guest.exec'
   | 'guest.sessions'
   | 'guest.sessionKill'
+  | 'guest.sessionRename'
+  | 'browser.profiles'
+  | 'browser.useProfile'
+  | 'browser.renameProfile'
   | 'dns.get'
   | 'dns.set';
 
@@ -159,6 +163,11 @@ export interface GuestExecResult {
 
 export interface SessionKillParams {
   name: string;
+}
+
+export interface BrowserProfiles {
+  current: string;
+  profiles: string[];
 }
 
 export interface TmuxSession {

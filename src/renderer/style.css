@@ -353,3 +353,18 @@ body.browser-focus .browser-body webview { border-radius: 0; border: 0; height: 
 .sess-kill:hover { background: #eceae5; color: var(--bad); }
 .sess-row:hover { background: #efedea; }
 .sess-empty { font-size: 12px; color: #8a8a83; padding: 6px 8px; }
+
+.modal-overlay { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(28,28,26,.28); }
+.modal { width: 480px; max-width: calc(100vw - 48px); background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 20px; box-shadow: 0 18px 48px rgba(0,0,0,.18); }
+.modal h2 { margin: 0 0 4px; font-size: 16px; }
+.modal-sub { margin: 0 0 14px; font-size: 12.5px; color: var(--muted); }
+.check-progress { display: flex; flex-direction: column; gap: 8px; }
+.check-row { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.check-row b { font-weight: 600; min-width: 190px; }
+.check-row .detail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.check-row .dot { width: 8px; height: 8px; border-radius: 50%; background: #cfccc4; flex: none; }
+.check-row.running .dot { background: #d8a13a; }
+.check-row.ok .dot { background: var(--ok); }
+.check-row.bad .dot { background: var(--bad); }
+.modal-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
+.modal-status { font-size: 12.5px; color: var(--muted); }

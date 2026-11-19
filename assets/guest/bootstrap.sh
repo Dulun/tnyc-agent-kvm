@@ -21,7 +21,6 @@ NODE_TZ=America/Los_Angeles
 NODE_LANG=en_US.UTF-8
 ln -sf "/usr/share/zoneinfo/$NODE_TZ" /etc/localtime 2>/dev/null || true
 echo "$NODE_TZ" > /etc/timezone 2>/dev/null || true
-CHROME_DIR=/root/.chrome-cage
 NOVNC_WEB=/usr/share/novnc
 export DEBIAN_FRONTEND=noninteractive
 
@@ -63,11 +62,14 @@ chmod 0644 /root/.tmux.conf
 fc-cache -f >/dev/null 2>&1 || true
 
 # --- browser launcher -------------------------------------------------------
-install -d -m 0700 "$CHROME_DIR"
 cat >/usr/local/bin/cage-browser-start <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 export DISPLAY=:99
+PROFILE_FILE=/root/.cage-profile
+profile="$(cat "$PROFILE_FILE" 2>/dev/null || echo cage)"
+CHROME_DIR="/root/.chrome-$profile"
+mkdir -p "$CHROME_DIR"
 # Xvnc (not Xvfb+x11vnc) because it implements SetDesktopSize: noVNC can then
 # resize the guest desktop to the pane, which is the only way the picture is
 # pixel-exact instead of a scaled-down 1080p frame. openbox makes Chrome follow
@@ -96,7 +98,7 @@ exec google-chrome \
   --remote-debugging-port=9222 \
   --remote-debugging-address=127.0.0.1 \
   --disable-blink-features=AutomationControlled \
-  --user-data-dir=/root/.chrome-cage \
+  --user-data-dir="$CHROME_DIR" \
   --lang=en-US \
   --no-first-run \
   --no-default-browser-check \

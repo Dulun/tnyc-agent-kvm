@@ -22,11 +22,11 @@ function readFontSize(): number {
 
 interface Tab {
   id: string;
+  title: string;
   /** tmux session this tab is attached to, if any */
   session?: string;
   term: Terminal;
   host: HTMLDivElement;
-  tabEl: HTMLDivElement;
   cols: number;
   rows: number;
   exited: boolean;
@@ -48,11 +48,13 @@ export class TerminalTabs {
   private fontLabel: HTMLElement | null = null;
   private frame = 0;
   private closed = false;
+  /** Fires whenever tabs are created, closed, renamed or switch focus. */
+  onChange: (tabs: Array<{ id: string; title: string; active: boolean; exited: boolean }>) => void = () => {};
 
   constructor(private readonly app: AppApi, root: HTMLElement) {
     root.innerHTML = `
       <div class="tabstrip">
-        <div class="tabs"></div>
+        <span class="tabstrip-hint" id="term-hint">终端</span>
         <span class="term-font">
           <button type="button" class="tab-new" id="term-font-down" title="缩小字号">A−</button>
           <span class="term-font-size" id="term-font-size">${this.fontSize}</span>
@@ -178,19 +180,6 @@ export class TerminalTabs {
       },
     });
 
-    const tabEl = document.createElement('div');
-    tabEl.className = 'tab';
-    tabEl.innerHTML =
-      '<span class="dot"></span><span class="tab-label"></span><button type="button" class="tab-close" title="关闭标签页">×</button>';
-    const label = tabEl.querySelector<HTMLElement>('.tab-label');
-    if (label) label.textContent = title;
-    tabEl.addEventListener('mousedown', () => this.activate(handle.id));
-    tabEl.querySelector('.tab-close')?.addEventListener('click', (event) => {
-      event.stopPropagation();
-      this.close(handle.id);
-    });
-    this.strip.append(tabEl);
-
     term.attachCustomKeyEventHandler((event) => {
       if (event.type === 'keydown' && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c' && term.hasSelection()) {
         void navigator.clipboard.writeText(term.getSelection()).catch(() => undefined);
@@ -200,8 +189,9 @@ export class TerminalTabs {
     });
     term.onData((data) => this.app.terminalWrite(handle.id, data));
 
-    const tab: Tab = { id: handle.id, term, host, tabEl, cols: 80, rows: 24, exited: false, refits: [], ...(session ? { session } : {}) };
+    const tab: Tab = { id: handle.id, term, host, cols: 80, rows: 24, exited: false, refits: [], title, ...(session ? { session } : {}) };
     this.tabs.set(handle.id, tab);
+    this.notify();
     this.body.append(host);
     term.open(host);
     for (const chunk of this.pending.get(handle.id) ?? []) term.write(chunk);
@@ -278,16 +268,39 @@ export class TerminalTabs {
     this.app.terminalResize(tab.id, cols, rows);
   }
 
+  list(): Array<{ id: string; title: string; active: boolean; exited: boolean }> {
+    return [...this.tabs.values()].map((t) => ({ id: t.id, title: t.title, active: t.id === this.active, exited: t.exited }));
+  }
+
+  renameTab(id: string, title: string): void {
+    const tab = this.tabs.get(id);
+    if (!tab) return;
+    tab.title = title;
+    this.notify();
+  }
+
+  closeTab(id: string): void {
+    this.close(id);
+  }
+
+  focusTab(id: string): void {
+    if (this.tabs.has(id)) this.activate(id);
+  }
+
+  private notify(): void {
+    this.onChange(this.list());
+  }
+
   private activate(id: string): void {
     const tab = this.tabs.get(id);
     if (!tab) return;
     for (const other of this.tabs.values()) {
       const on = other.id === id;
       other.host.classList.toggle('active', on);
-      other.tabEl.classList.toggle('active', on);
     }
     this.active = id;
     tab.term.focus();
+    this.notify();
     this.fitNow();
     this.empty.hidden = this.tabs.size > 0;
   }
@@ -300,8 +313,8 @@ export class TerminalTabs {
     this.observers.delete(id);
     tab.term.dispose();
     tab.host.remove();
-    tab.tabEl.remove();
     this.tabs.delete(id);
+    this.notify();
     this.pending.delete(id);
     if (this.active === id) {
       this.active = [...this.tabs.keys()][0] ?? null;
@@ -314,8 +327,8 @@ export class TerminalTabs {
     const tab = this.tabs.get(id);
     if (!tab) return;
     tab.exited = true;
+    this.notify();
     tab.term.write('\r\n\x1b[31m[会话已结束 — 点击「新会话」重新打开]\x1b[0m\r\n');
-    tab.tabEl.classList.add('exited');
   }
 
   private bumpFont(delta: number): void {

@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
 import type { BrowserWindow } from 'electron';
-import type { TmuxSession } from '../shared/rpc';
+import type { BrowserProfiles, TmuxSession } from '../shared/rpc';
 import type {
   CheckParams,
   CheckResult,
@@ -51,6 +51,10 @@ const RPC_METHODS: Record<RpcMethod, true> = {
   'dns.set': true,
   'guest.sessions': true,
   'guest.sessionKill': true,
+  'guest.sessionRename': true,
+  'browser.profiles': true,
+  'browser.useProfile': true,
+  'browser.renameProfile': true,
 };
 
 /** Methods that legitimately run for minutes on the host; never time these out. */
@@ -62,6 +66,10 @@ const LONG_RUNNING: Record<string, true> = {
   'dns.set': true,
   'guest.sessions': true,
   'guest.sessionKill': true,
+  'guest.sessionRename': true,
+  'browser.profiles': true,
+  'browser.useProfile': true,
+  'browser.renameProfile': true,
 };
 
 function asInteger(value: unknown, name: string, min: number, max: number): number {
@@ -250,6 +258,23 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle(IPC.sessions, (): Promise<TmuxSession[]> => {
     return requireSession().rpc.request<TmuxSession[]>('guest.sessions');
+  });
+
+  ipcMain.handle(IPC.sessionRename, (_event, from: unknown, to: unknown): Promise<void> => {
+    const ok = (v: unknown): v is string => typeof v === 'string' && /^[\w.-]+$/.test(v);
+    if (!ok(from) || !ok(to)) throw new Error('invalid session name');
+    return requireSession().rpc.request<void>('guest.sessionRename', { from, to });
+  });
+
+  ipcMain.handle(IPC.browserProfiles, () => requireSession().rpc.request<BrowserProfiles>('browser.profiles'));
+  ipcMain.handle(IPC.browserUseProfile, (_event, name: unknown): Promise<void> => {
+    if (typeof name !== 'string' || !/^[\w.-]{1,32}$/.test(name)) throw new Error('invalid profile name');
+    return requireSession().rpc.request<void>('browser.useProfile', { name });
+  });
+  ipcMain.handle(IPC.browserRenameProfile, (_event, from: unknown, to: unknown): Promise<void> => {
+    const ok = (v: unknown): v is string => typeof v === 'string' && /^[\w.-]{1,32}$/.test(v);
+    if (!ok(from) || !ok(to)) throw new Error('invalid profile name');
+    return requireSession().rpc.request<void>('browser.renameProfile', { from, to });
   });
 
   ipcMain.handle(IPC.sessionKill, (_event, name: unknown): Promise<void> => {

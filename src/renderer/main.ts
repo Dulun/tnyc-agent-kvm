@@ -129,10 +129,11 @@ function mountShell(): void {
           <button type="button" class="nav-item" data-view="browser">${icon('globe', 16)}<span>浏览器</span></button>
           <button type="button" class="nav-item" data-view="ssh">${icon('server', 16)}<span>SSH</span></button>
         </nav>
-        <div class="sb-section"><span>终端</span><button type="button" class="icon-btn" id="sess-refresh" title="刷新会话" aria-label="刷新会话">${icon('plus', 14)}</button></div>
+        <div class="sb-section"><span>浏览器</span><button type="button" class="icon-btn" id="prof-add" title="新建浏览器配置" aria-label="新建浏览器配置">${icon('plus', 14)}</button></div>
+        <div class="sess-list" id="prof-list"></div>
+        <div class="sb-section"><span>SSH</span><button type="button" class="icon-btn" id="sess-refresh" title="新建终端" aria-label="新建终端">${icon('plus', 14)}</button></div>
         <div class="sess-list" id="sess-list"></div>
-        <div class="sb-spacer"></div>
-        <div class="health" id="health"></div>
+        <div class="sb-spacer"></div>        <div class="health" id="health"></div>
         <div class="user-card">
           <span class="avatar">${esc(initial)}</span>
           <span class="user-text"><b>本机账户</b><small>远程主机</small></span>
@@ -185,63 +186,128 @@ function mountShell(): void {
 
   el(root, '#open-settings').addEventListener('click', () => setView('settings'));
 
-  const sessList = el<HTMLElement>(root, '#sess-list');
-  const refreshSessions = async (): Promise<void> => {
+  const profList = el<HTMLElement>(root, '#prof-list');
+  const refreshProfiles = async (): Promise<void> => {
     if (!api) return;
     try {
-      const sessions = await api.sessions();
-      sessList.replaceChildren(
-        ...sessions.map((session) => {
+      const info = await api.browserProfiles();
+      profList.replaceChildren(
+        ...info.profiles.map((name) => {
           const row = document.createElement('div');
-          row.className = 'sess-row';
-          row.title = `${session.windows} 个窗口${session.attached ? ' · 已挂载' : ''}`;
+          row.className = `sess-row${name === info.current ? ' active' : ''}`;
           const label = document.createElement('button');
           label.type = 'button';
           label.className = 'sess-open';
-          label.textContent = session.name;
-          label.addEventListener('click', () => void newTerminal(session.name));
-          const kill = document.createElement('button');
-          kill.type = 'button';
-          kill.className = 'sess-kill';
-          kill.title = `删除会话 ${session.name}`;
-          kill.textContent = '×';
-          kill.addEventListener('click', async (event) => {
-            event.stopPropagation();
-            if (!window.confirm(`删除终端会话「${session.name}」？其中的进程会被结束。`)) return;
+          label.textContent = name === info.current ? `${name} · 使用中` : name;
+          label.addEventListener('click', async () => {
+            if (name !== info.current) {
+              label.textContent = `${name} · 切换中…`;
+              try {
+                await api.browserUseProfile(name);
+                browserPane?.reload();
+              } catch (error) {
+                window.alert(error instanceof Error ? error.message : String(error));
+              }
+              await refreshProfiles();
+            }
+            setView('browser');
+          });
+          row.addEventListener('contextmenu', async (event) => {
+            event.preventDefault();
+            const to = window.prompt('重命名浏览器配置', name)?.trim();
+            if (!to || to === name) return;
             try {
-              await api.sessionKill(session.name);
-              await refreshSessions();
+              await api.browserRenameProfile(name, to);
             } catch (error) {
               window.alert(error instanceof Error ? error.message : String(error));
             }
+            await refreshProfiles();
           });
-          row.append(label, kill);
+          row.append(label);
           return row;
         }),
       );
-      if (sessions.length === 0) {
+      if (info.profiles.length === 0) {
         const hint = document.createElement('div');
         hint.className = 'sess-empty';
-        hint.textContent = '暂无会话';
-        sessList.replaceChildren(hint);
+        hint.textContent = '暂无配置';
+        profList.replaceChildren(hint);
       }
     } catch {
-      sessList.replaceChildren();
+      profList.replaceChildren();
     }
   };
-  refreshSessionList = refreshSessions;
+  el(root, '#prof-add').addEventListener('click', async () => {
+    const name = window.prompt('新浏览器配置名（独立 cookie / 登录状态）', `browser-${Date.now().toString().slice(-4)}`)?.trim();
+    if (!name || !api) return;
+    try {
+      await api.browserUseProfile(name);
+      browserPane?.reload();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+    }
+    await refreshProfiles();
+    setView('browser');
+  });
+  void refreshProfiles();
+  window.setInterval(() => void refreshProfiles(), 20_000);
+
+  const sessList = el<HTMLElement>(root, '#sess-list');
+  const renderTerminals = (tabs: Array<{ id: string; title: string; active: boolean; exited: boolean }>): void => {
+    sessList.replaceChildren(
+      ...tabs.map((tab) => {
+        const row = document.createElement('div');
+        row.className = `sess-row${tab.active ? ' active' : ''}`;
+        const label = document.createElement('button');
+        label.type = 'button';
+        label.className = 'sess-open';
+        label.textContent = tab.title;
+        label.addEventListener('click', () => {
+          setView('ssh');
+          term?.focusTab(tab.id);
+        });
+        row.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          const next = window.prompt('重命名终端', tab.title)?.trim();
+          if (next) term?.renameTab(tab.id, next);
+        });
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'sess-kill';
+        close.title = '关闭终端';
+        close.textContent = '\u00d7';
+        close.addEventListener('click', (event) => {
+          event.stopPropagation();
+          term?.closeTab(tab.id);
+        });
+        row.append(label, close);
+        return row;
+      }),
+    );
+    if (tabs.length === 0) {
+      const hint = document.createElement('div');
+      hint.className = 'sess-empty';
+      hint.textContent = '暂无终端';
+      sessList.replaceChildren(hint);
+    }
+  };
   el(root, '#sess-refresh').addEventListener('click', () => void newTerminal());
-  void refreshSessions();
-  window.setInterval(() => void refreshSessions(), 20_000);
+  refreshSessionProfile = refreshProfiles;
+  renderTerminalsHook = renderTerminals;
+  renderTerminalsHook(term?.list() ?? []);
+
+  void refreshProfiles();
+  window.setInterval(() => void refreshProfiles(), 20_000);
 }
 
-let refreshSessionList: () => Promise<void> = async () => {};
+
+let refreshSessionProfile: () => Promise<void> = async () => {};
+let renderTerminalsHook: (tabs: Array<{ id: string; title: string; active: boolean; exited: boolean }>) => void = () => {};
 
 async function newTerminal(session?: string): Promise<void> {
   setView('ssh');
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   if (term) await term.open(session);
-  void refreshSessionList();
 }
 
 function setView(next: View): void {
@@ -258,6 +324,7 @@ function setView(next: View): void {
   if (next === 'ssh' && !term && api) {
     if (viewEls) {
       term = new TerminalTabs(api, viewEls.ssh);
+      term.onChange = (tabs) => renderTerminalsHook(tabs);
       // Plain shell, no tmux: tmux paints on the alternate screen, which leaves
       // xterm with zero scrollback and makes the wheel dead. A plain shell keeps
       // history in the client, which is what makes scrolling work.
@@ -408,6 +475,7 @@ async function runCheck(): Promise<void> {
   checking = true;
   errorMessage = null;
   paint();
+  openCheckModal(['v4 egress', 'v6 egress', 'DNS is fake-ip', 'STUN/QUIC (v4+v6) dropped', 'host LAN unreachable']);
   try {
     const result = await withTimeout(api.checkRun(), 180_000, '泄漏检查超时（180 秒）');
     if (status) status = { ...status, lastCheck: result };
@@ -445,7 +513,82 @@ async function runInstance(action: 'start' | 'stop'): Promise<void> {
 
 /* ---------- lifecycle ---------- */
 
+let checkModal: HTMLElement | null = null;
+const checkRows = new Map<string, HTMLElement>();
+
+function openCheckModal(names: string[]): void {
+  closeCheckModal();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h2>泄漏检查</h2>
+      <p class="modal-sub">逐项验证客机是否只经过所选节点。</p>
+      <div class="check-progress" id="check-progress"></div>
+      <div class="modal-actions"><span id="check-summary" class="modal-status">进行中…</span>
+        <button type="button" class="primary" id="check-close" disabled>关闭</button></div>
+    </div>`;
+  document.body.append(overlay);
+  checkModal = overlay;
+  checkRows.clear();
+  const progress = overlay.querySelector<HTMLElement>('#check-progress');
+  for (const name of names) {
+    const row = document.createElement('div');
+    row.className = 'check-row pending';
+    row.innerHTML = '<span class="dot"></span><b></b><span class="detail">等待中…</span>';
+    const label = row.querySelector('b');
+    if (label) label.textContent = name;
+    progress?.append(row);
+    checkRows.set(name, row);
+  }
+  overlay.querySelector('#check-close')?.addEventListener('click', () => closeCheckModal());
+}
+
+function closeCheckModal(): void {
+  checkModal?.remove();
+  checkModal = null;
+  checkRows.clear();
+}
+
+function paintCheckEvent(event: string, data: unknown): void {
+  if (!checkModal) return;
+  const payload = data as { names?: string[]; name?: string; ok?: boolean; detail?: string; items?: Array<{ name: string; ok: boolean; detail: string }> };
+  if (event === 'check.start' && payload.names) {
+    openCheckModal(payload.names);
+    return;
+  }
+  if (event === 'check.before' && payload.name) {
+    const row = checkRows.get(payload.name);
+    if (row) {
+      row.className = 'check-row running';
+      const detail = row.querySelector('.detail');
+      if (detail) detail.textContent = '检测中…';
+    }
+    return;
+  }
+  if (event === 'check.item' && payload.name) {
+    const row = checkRows.get(payload.name);
+    if (row) {
+      row.className = `check-row ${payload.ok ? 'ok' : 'bad'}`;
+      const detail = row.querySelector('.detail');
+      if (detail) detail.textContent = payload.detail ?? '';
+    }
+    return;
+  }
+  if (event === 'check.done' && payload.items) {
+    const failed = payload.items.filter((i) => !i.ok).length;
+    const summary = checkModal.querySelector<HTMLElement>('#check-summary');
+    if (summary) summary.textContent = failed === 0 ? '全部通过' : `${failed} 项未通过`;
+    const close = checkModal.querySelector<HTMLButtonElement>('#check-close');
+    if (close) close.disabled = false;
+  }
+}
+
 function handleEvent(event: string, data: unknown): void {
+  if (event.startsWith('check.')) {
+    paintCheckEvent(event, data);
+    return;
+  }
   const lower = event.toLowerCase();
   if (lower.includes('lock') || lower.includes('maintenance')) {
     const released = lower.includes('release') || lower.includes('unlock') || data === false;

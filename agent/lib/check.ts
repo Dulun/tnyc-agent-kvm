@@ -94,6 +94,7 @@ async function hostLanBlocked(vm: string): Promise<CheckItem> {
 
 async function killTest(vm: string, ctx: Ctx): Promise<CheckItem[]> {
   const items: CheckItem[] = [];
+
   ctx.log('check: kill test — stopping mihomo');
   try {
     await gwOk('sudo -n systemctl stop mihomo', { timeoutMs: 20_000 });
@@ -138,12 +139,18 @@ export async function runCheck(
     ['host LAN unreachable', () => hostLanBlocked(vm)],
   ];
   const items: CheckItem[] = [];
+  const total = checks.length;
+  ctx.emit({ event: 'check.start', data: { total, names: checks.map(([name]) => name) } });
   for (const [name, fn] of checks) {
+    ctx.emit({ event: 'check.before', data: { name } });
+    let result: CheckItem;
     try {
-      items.push(await fn());
+      result = await fn();
     } catch (err) {
-      items.push(item(name, false, (err as Error).message));
+      result = item(name, false, (err as Error).message);
     }
+    items.push(result);
+    ctx.emit({ event: 'check.item', data: result });
   }
   if (full) {
     try {
@@ -153,6 +160,7 @@ export async function runCheck(
     }
   }
   const result: CheckResult = { ok: items.every((i) => i.ok), at: nowIso(), items };
+  ctx.emit({ event: 'check.done', data: result });
   await writeJsonAtomic(LAST_CHECK_FILE, result).catch(() => undefined);
   return result;
 }
