@@ -270,9 +270,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     return status.instances;
   });
 
-  ipcMain.handle(IPC.terminalOpen, (_event, raw: unknown): Promise<TerminalHandle> => {
+  ipcMain.handle(IPC.terminalOpen, async (_event, raw: unknown): Promise<TerminalHandle> => {
+    const options = asTerminalOptions(raw);
     const current = requireSession();
-    return terminals.open(current.conn, current.agentPath, asTerminalOptions(raw));
+    try {
+      return await terminals.open(current.conn, current.agentPath, options);
+    } catch (err) {
+      // sshd caps concurrent channels (MaxSessions); a stale or exhausted
+      // connection surfaces here as "open failed". Reconnect once and retry so
+      // opening a tab never dies on leftovers from a previous window.
+      if (!/channel open failure|open failed/i.test(err instanceof Error ? err.message : String(err))) throw err;
+      const fresh = await reconnectSession();
+      return terminals.open(fresh.conn, fresh.agentPath, options);
+    }
   });
 
   ipcMain.on(IPC.terminalWrite, (_event, id: unknown, data: unknown) => {
