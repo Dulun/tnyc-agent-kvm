@@ -24,7 +24,7 @@ export DEBIAN_FRONTEND=noninteractive
 # --- packages ---------------------------------------------------------------
 apt-get update -qq
 apt-get install -y --no-install-recommends \
-  xvfb x11vnc novnc websockify tmux curl ca-certificates
+  tigervnc-standalone-server openbox novnc websockify tmux curl ca-certificates
 
 # --- Google Chrome stable ---------------------------------------------------
 if ! command -v google-chrome >/dev/null 2>&1; then
@@ -57,17 +57,25 @@ cat >/usr/local/bin/cage-browser-start <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 export DISPLAY=:99
-# Idempotent: a unit restart (Chrome exit) must not tear down the X server or the
-# VNC session, and a restart raced with a stale X socket once dropped every client.
-if ! pgrep -f 'Xvfb :99' >/dev/null 2>&1; then
+# Xvnc (not Xvfb+x11vnc) because it implements SetDesktopSize: noVNC can then
+# resize the guest desktop to the pane, which is the only way the picture is
+# pixel-exact instead of a scaled-down 1080p frame. openbox makes Chrome follow
+# that resize (a bare X server has no window manager to re-maximise it).
+if ! pgrep -x Xvnc >/dev/null 2>&1; then
+  # Migration: an earlier build ran Xvfb+x11vnc on :99; they must go or Xvnc
+  # cannot bind the display.
+  pkill -f 'Xvfb :99' 2>/dev/null || true
+  pkill -x x11vnc 2>/dev/null || true
+  sleep 0.5
   rm -f /tmp/.X11-unix/X99 /tmp/.X99-lock 2>/dev/null || true
-  Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
+  Xvnc :99 -geometry 1920x1080 -depth 24 -rfbport 5900 -localhost \
+    -SecurityTypes None -AlwaysShared -AcceptSetDesktopSize &
 fi
 for _ in $(seq 1 100); do
   [ -e /tmp/.X11-unix/X99 ] && break
   sleep 0.1
 done
-pgrep -x x11vnc >/dev/null 2>&1 || x11vnc -display :99 -localhost -rfbport 5900 -nopw -shared -forever -norc &
+pgrep -x openbox >/dev/null 2>&1 || openbox --sm-disable >/dev/null 2>&1 &
 pgrep -f 'websockify --web' >/dev/null 2>&1 || websockify --web /usr/share/novnc 127.0.0.1:6080 localhost:5900 &
 exec google-chrome \
   --no-sandbox \
@@ -78,8 +86,7 @@ exec google-chrome \
   --lang=en-US \
   --no-first-run \
   --no-default-browser-check \
-  --window-size=1920,1080 \
-  --window-position=0,0 \
+  --start-maximized \
   about:blank
 EOF
 chmod 0755 /usr/local/bin/cage-browser-start

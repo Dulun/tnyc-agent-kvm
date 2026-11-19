@@ -52,6 +52,20 @@ const HANDLERS: Record<RpcMethod, Handler> = {
     }
     return {};
   },
+  'guest.sessions': async () => {
+    const rec = await findInstance();
+    const vm = rec?.name ?? (await instanceList())[0]?.name ?? 'cage';
+    const res = await guestExec(vm, "tmux list-sessions -F '#{session_name}|#{session_attached}|#{session_windows}' 2>/dev/null", 20_000);
+    return res.out
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.includes('|'))
+      .map((line) => {
+        const [name = '', attached = '0', windows = '0'] = line.split('|');
+        return { name, attached: attached !== '0', windows: Number.parseInt(windows, 10) || 0 };
+      })
+      .filter((session) => session.name !== '');
+  },
   'guest.exec': async (params) => {
     const cmd = (params as GuestExecParams | undefined)?.cmd;
     if (typeof cmd !== 'string' || cmd.trim() === '') {

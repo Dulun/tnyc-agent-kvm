@@ -18,8 +18,20 @@ export interface PtyOptions {
 
 export function runPty(opts: PtyOptions): Promise<void> {
   // The app renders its own tab strip, so the tmux status line is noise.
+  // Rewrite the session the way this app expects before attaching: no status
+  // line (the app draws tabs), no mouse capture (the wheel scrolls the client's
+  // scrollback instead of entering copy-mode, which swallows every keystroke),
+  // and cancel any copy-mode a previous attach left behind.
+  const prep = [
+    'tmux set-option -g status off',
+    'tmux set-option -g mouse off',
+    // Without this tmux paints on the alternate screen and the client keeps no
+    // scrollback at all, so the wheel can never reach history.
+    'tmux set-option -g alternate-screen off',
+    'for p in $(tmux list-panes -a -F \'#{pane_id}\' 2>/dev/null); do tmux send-keys -X -t "$p" cancel 2>/dev/null; done',
+  ].join('; ');
   const remote = opts.session
-    ? `tmux set-option -g status off 2>/dev/null; tmux set-option -g mouse off 2>/dev/null; tmux new-session -A -s ${sq(opts.session)} -x ${opts.cols} -y ${opts.rows}`
+    ? `${prep}; tmux new-session -A -s ${sq(opts.session)} -x ${opts.cols} -y ${opts.rows}`
     : 'exec bash -l';
   const child = spawn('ssh', [...SSH_OPTS, '-tt', '-J', GATEWAY, CAGE, `env TERM=xterm-256color LC_ALL=C.UTF-8 ${remote}`], {
     stdio: ['pipe', 'inherit', 'inherit'],

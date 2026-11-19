@@ -138,6 +138,8 @@ function mountShell(): void {
           <button type="button" class="icon-btn" id="project-rename" title="重命名" aria-label="重命名">${icon('pencil', 14)}</button>
           <button type="button" class="icon-btn" id="project-trash" title="删除项目" aria-label="删除项目">${icon('trash', 14)}</button>
         </div>
+        <div class="sb-section"><span>终端</span><button type="button" class="icon-btn" id="sess-refresh" title="刷新会话" aria-label="刷新会话">${icon('plus', 14)}</button></div>
+        <div class="sess-list" id="sess-list"></div>
         <div class="sb-spacer"></div>
         <div class="health" id="health"></div>
         <div class="user-card">
@@ -201,12 +203,48 @@ function mountShell(): void {
     nameEl.textContent = next.trim();
     localStorage.setItem(PROJECT_KEY, next.trim());
   });
+  const sessList = el<HTMLElement>(root, '#sess-list');
+  const refreshSessions = async (): Promise<void> => {
+    if (!api) return;
+    try {
+      const sessions = await api.sessions();
+      sessList.replaceChildren(
+        ...sessions.map((session) => {
+          const row = document.createElement('button');
+          row.type = 'button';
+          row.className = 'sess-row';
+          row.textContent = `tmux:${session.name}`;
+          row.title = `${session.windows} 个窗口${session.attached ? ' · 已挂载' : ''}`;
+          row.addEventListener('click', () => {
+            setView('ssh');
+            void term?.open(session.name);
+          });
+          return row;
+        }),
+      );
+      if (sessions.length === 0) {
+        const hint = document.createElement('div');
+        hint.className = 'sess-empty';
+        hint.textContent = '暂无会话';
+        sessList.replaceChildren(hint);
+      }
+    } catch {
+      sessList.replaceChildren();
+    }
+  };
+  el(root, '#sess-refresh').addEventListener('click', () => void refreshSessions());
+  void refreshSessions();
+  window.setInterval(() => void refreshSessions(), 20_000);
+
   el(root, '#project-trash').addEventListener('click', () => {
     window.confirm(`删除项目「${nameEl.textContent ?? ''}」？`);
   });
 }
 
 function setView(next: View): void {
+  // leaving the browser view must always restore the sidebar, even if a
+  // previous build left the focus class behind
+  if (next !== 'browser') document.body.classList.remove('browser-focus');
   view = next;
   if (titleEl) titleEl.textContent = TITLES[next];
   if (viewEls) for (const key of VIEWS) viewEls[key].hidden = key !== next;
@@ -353,13 +391,19 @@ async function refresh(clearError = false): Promise<void> {
   paint();
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  const timer = Promise.withResolvers<never>();
+  const handle = setTimeout(() => timer.reject(new Error(message)), ms);
+  return Promise.race([promise, timer.promise]).finally(() => clearTimeout(handle));
+}
+
 async function runCheck(): Promise<void> {
   if (checking) return;
   checking = true;
   errorMessage = null;
   paint();
   try {
-    const result = await api.checkRun();
+    const result = await withTimeout(api.checkRun(), 180_000, '泄漏检查超时（180 秒）');
     if (status) status = { ...status, lastCheck: result };
     await refresh();
   } catch (failure) {

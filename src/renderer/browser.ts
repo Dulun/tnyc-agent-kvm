@@ -13,7 +13,7 @@ function noVncUrl(raw: string): string {
   url.protocol = url.protocol === 'wss:' || url.protocol === 'https:' ? 'https:' : 'http:';
   if (!url.pathname.endsWith('/')) url.pathname += '/';
   url.pathname += 'vnc.html';
-  url.search = new URLSearchParams({ autoconnect: '1', resize: 'scale', reconnect: '1', reconnect_delay: '1000' }).toString();
+  url.search = new URLSearchParams({ autoconnect: '1', resize: 'remote', reconnect: '1', reconnect_delay: '1000' }).toString();
   return url.toString();
 }
 
@@ -76,19 +76,21 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
         void (frame as unknown as { executeJavaScript(code: string): Promise<unknown> })
           .executeJavaScript(
             "document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';" +
-              "window.scrollTo(0,0);" +
-              // noVNC's control bar overlaps the guest desktop at 1:1.
-              "for (const sel of ['#noVNC_control_bar','#noVNC_control_bar_anchor','#noVNC_status','#noVNC_power_button'])" +
-              "  for (const el of document.querySelectorAll(sel)) el.style.display='none';",
+              "window.scrollTo(0,0);",
           )
           .catch(() => undefined);
       });
       frame.addEventListener('did-fail-load', () => {
         if (seq === loadSeq) showOverlay('访客桌面加载失败，请重试。', true);
       });
-      frame.src = src;
       bodyEl.querySelector('webview')?.remove();
       bodyEl.append(frame);
+      // Retina: the guest must render at device pixels or the browser upscales a
+      // 1x bitmap. Zooming the guest page out by the device pixel ratio makes
+      // noVNC ask for a 2x desktop, which is then shown downscaled (still sharp).
+      const zoom = (frame as unknown as { setZoomFactor?: (z: number) => void });
+      zoom.setZoomFactor?.(1 / Math.max(1, window.devicePixelRatio || 1));
+      frame.src = src;
     } catch (error) {
       if (seq !== loadSeq) return;
       current = null;
@@ -119,6 +121,7 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
     if (current) window.open(current, '_blank');
   });
 
+  document.body.classList.remove('browser-focus');
   void load();
 
   return {

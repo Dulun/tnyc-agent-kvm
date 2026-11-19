@@ -55,6 +55,9 @@ function connectClient(config: ConnectConfig, hop: Hop): Promise<Client> {
       client.removeListener('error', onError);
       // post-ready transport errors must not crash the main process
       client.on('error', () => {});
+      // Keystroke latency: Nagle would batch 40ms round trips on the PTY channel.
+      const transport = (client as unknown as { _sock?: { setNoDelay?: (on: boolean) => void } })._sock;
+      transport?.setNoDelay?.(true);
       resolve(client);
     });
     client.connect({ ...config, readyTimeout: 25_000 });

@@ -10,6 +10,7 @@ import type {
   ProxySetParams,
   ProxyState,
   DnsMode,
+  TmuxSession,
 } from './rpc';
 
 /** Host connection the user picks in the setup wizard. */
@@ -57,6 +58,7 @@ export interface AppApi {
   proxyGet(): Promise<ProxyState>;
   proxySet(params: ProxySetParams): Promise<void>;
   dnsSet(mode: DnsMode): Promise<void>;
+  sessions(): Promise<TmuxSession[]>;
   checkRun(params?: CheckParams): Promise<CheckResult>;
   guestExec(params: GuestExecParams): Promise<GuestExecResult>;
   guestBootstrap(): Promise<void>;
@@ -89,6 +91,7 @@ export const IPC = {
   proxyGet: 'app:proxyGet',
   proxySet: 'app:proxySet',
   dnsSet: 'app:dnsSet',
+  sessions: 'app:sessions',
   checkRun: 'app:checkRun',
   guestExec: 'app:guestExec',
   guestBootstrap: 'app:guestBootstrap',

@@ -37,6 +37,7 @@ export type RpcMethod =
   | 'check.run'
   | 'guest.bootstrap'
   | 'guest.exec'
+  | 'guest.sessions'
   | 'dns.get'
   | 'dns.set';
 
@@ -153,6 +154,12 @@ export interface GuestExecParams {
 export interface GuestExecResult {
   code: number;
   out: string;
+}
+
+export interface TmuxSession {
+  name: string;
+  attached: boolean;
+  windows: number;
 }
 
 export interface DnsSetParams {

@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import type { BrowserWindow } from 'electron';
+import type { TmuxSession } from '../shared/rpc';
 import type {
   CheckParams,
   CheckResult,
@@ -47,6 +48,7 @@ const RPC_METHODS: Record<RpcMethod, true> = {
   'guest.exec': true,
   'dns.get': true,
   'dns.set': true,
+  'guest.sessions': true,
 };
 
 /** Methods that legitimately run for minutes on the host; never time these out. */
@@ -56,6 +58,7 @@ const LONG_RUNNING: Record<string, true> = {
   'instance.start': true,
   'guest.bootstrap': true,
   'dns.set': true,
+  'guest.sessions': true,
 };
 
 function asInteger(value: unknown, name: string, min: number, max: number): number {
@@ -230,10 +233,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     await requireSession().rpc.request('dns.set', params, 0);
   });
 
+  ipcMain.handle(IPC.sessions, (): Promise<TmuxSession[]> => {
+    return requireSession().rpc.request<TmuxSession[]>('guest.sessions');
+  });
+
   ipcMain.handle(IPC.checkRun, (_event, raw: unknown): Promise<CheckResult> => {
     const params: CheckParams = {};
     if (raw && typeof raw === 'object' && 'full' in raw && raw.full === true) params.full = true;
-    return requireSession().rpc.request<CheckResult>('check.run', params, params.full ? 0 : undefined);
+    // a full run stops mihomo and waits for the cage to drop; cap it well above the
+    // agent's own budget so the UI can never hang on a lost response
+    return requireSession().rpc.request<CheckResult>('check.run', params, 240_000);
   });
 
   ipcMain.handle(IPC.guestExec, (_event, raw: unknown): Promise<GuestExecResult> => {
