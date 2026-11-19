@@ -8,7 +8,7 @@
   --accent: #1c1c1a;
   --ok: #1a7f37;
   --bad: #b3261e;
-  --terminal: #1c1c1a;
+  --terminal: #ffffff;
   --sidebar-w: 248px;
   --footer-h: 32px;
 }
@@ -137,8 +137,9 @@ svg { display: block; }
   border-bottom: 1px solid var(--border);
 }
 .topbar h1 { margin: 0; font-size: 15px; font-weight: 600; }
-.content { flex: 1; min-height: 0; overflow: auto; }
-.view { min-height: 100%; }
+.content { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.view { flex: 1; min-height: 0; }
+.view[hidden] { display: none !important; }
 
 .banner {
   margin: 12px 20px 0; padding: 8px 12px; border-radius: 8px;
@@ -205,7 +206,7 @@ svg { display: block; }
   position: relative; flex: 1; min-height: 0;
   border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: #fff;
 }
-.browser-body iframe { width: 100%; height: 100%; border: 0; display: block; }
+body .browser-body webview { width: 100%; height: 100%; border: 0; display: flex; }
 .browser-overlay {
   position: absolute; inset: 0; z-index: 1;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
@@ -237,13 +238,13 @@ svg { display: block; }
 .tab-new:hover { color: var(--text); }
 .term-body {
   position: relative; flex: 1; min-height: 0; margin-top: 8px;
-  background: var(--terminal); border-radius: 12px; overflow: hidden;
+  background: var(--terminal); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
 }
 .term-host { position: absolute; inset: 8px; display: none; }
 .term-host.active { display: block; }
 .term-host .xterm { height: 100%; }
-.term-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #8a8a8f; font-size: 12px; }
-.term-loading { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; background: #1c1c1a; color: #b9b9b4; font-size: 12px; }
+.term-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #8a8a83; font-size: 12px; }
+.term-loading { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; background: #ffffff; color: var(--muted); font-size: 12px; }
 
 /* ---------- settings ---------- */
 .settings { max-width: 720px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
@@ -323,3 +324,10 @@ svg { display: block; }
 
 /* ---------- boot ---------- */
 .boot { display: flex; align-items: center; justify-content: center; min-height: 100%; color: var(--muted); font-size: 13px; }
+
+/* xterm's viewport paints an opaque white track; keep it on the terminal colour. */
+.term-body .xterm-viewport { background: transparent !important; }
+.term-body .xterm-viewport::-webkit-scrollbar { width: 10px; }
+.term-body .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+.term-body .xterm-viewport::-webkit-scrollbar-thumb { background: #d8d5cf; border-radius: 5px; }
+.term-body .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #c4c0b8; }

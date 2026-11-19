@@ -3,6 +3,7 @@ productName: TNYC Agent KVM
 directories:
   output: release
   buildResources: build-resources
+icon: build-resources/icon.png
 files:
   - build/**/*
   - package.json

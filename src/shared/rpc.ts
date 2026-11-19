@@ -66,6 +66,10 @@ export interface ProxyState {
   mode: 'v6';
   /** fake-ip: in-guest resolution shows 198.18.x; redir-host: real answers, slower first lookup */
   dnsMode: DnsMode;
+  /** dial target of the active node, e.g. an IPv6 literal for the hysteria2 nodes */
+  type?: string;
+  server?: string;
+  port?: number;
 }
 
 export interface RelayState {

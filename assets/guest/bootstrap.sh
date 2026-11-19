@@ -54,21 +54,29 @@ cat >/usr/local/bin/cage-browser-start <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 export DISPLAY=:99
-Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
+# Idempotent: a unit restart (Chrome exit) must not tear down the X server or the
+# VNC session, and a restart raced with a stale X socket once dropped every client.
+if ! pgrep -f 'Xvfb :99' >/dev/null 2>&1; then
+  rm -f /tmp/.X11-unix/X99 /tmp/.X99-lock 2>/dev/null || true
+  Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
+fi
 for _ in $(seq 1 100); do
-  [ -S /tmp/.X11-unix/X99 ] && break
+  [ -e /tmp/.X11-unix/X99 ] && break
   sleep 0.1
 done
-x11vnc -display :99 -localhost -rfbport 5900 -nopw -shared -forever &
-websockify --web /usr/share/novnc 127.0.0.1:6080 localhost:5900 &
+pgrep -x x11vnc >/dev/null 2>&1 || x11vnc -display :99 -localhost -rfbport 5900 -nopw -shared -forever -norc &
+pgrep -f 'websockify --web' >/dev/null 2>&1 || websockify --web /usr/share/novnc 127.0.0.1:6080 localhost:5900 &
 exec google-chrome \
   --no-sandbox \
+  --test-type \
   --disable-gpu \
+  --disable-dev-shm-usage \
   --user-data-dir=/root/.chrome-cage \
   --lang=en-US \
   --no-first-run \
   --no-default-browser-check \
-  --kiosk \
+  --window-size=1920,1080 \
+  --window-position=0,0 \
   about:blank
 EOF
 chmod 0755 /usr/local/bin/cage-browser-start

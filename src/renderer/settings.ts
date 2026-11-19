@@ -50,7 +50,10 @@ export function mountSettings(root: HTMLElement, ctx: SettingsContext): () => vo
     ['实例', instance ? `${instance.name} · ${instance.cageIp}` : '未创建'],
   ];
 
-  const proxyNode = status.node ?? status.proxy.node ?? '';
+  const proxyNode = status.proxy.node ?? '';
+  const dial = [status.proxy.type, status.proxy.server && status.proxy.port ? `${status.proxy.server}:${status.proxy.port}` : status.proxy.server]
+    .filter(Boolean)
+    .join(' · ');
   const exitIp = status.proxy.exitIp ?? '';
 
   root.innerHTML = `
@@ -62,7 +65,7 @@ export function mountSettings(root: HTMLElement, ctx: SettingsContext): () => vo
 
       <section class="card">
         <h2>节点</h2>
-        <p class="hint">当前节点：<code>${esc(proxyNode || '—')}</code>${exitIp ? ` · 出口：<code>${esc(exitIp)}</code>` : ''}</p>
+        <p class="hint">当前节点：<code>${esc(proxyNode || '—')}</code>${dial ? ` · <code>${esc(dial)}</code>` : ''}${exitIp ? ` · 出口：<code>${esc(exitIp)}</code>` : ''}</p>
         <div><button type="button" class="ghost" id="open-danger">更换节点</button></div>
 
         <section class="danger-panel" id="danger" hidden>

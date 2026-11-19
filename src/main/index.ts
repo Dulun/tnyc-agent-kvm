@@ -17,13 +17,19 @@ function createWindow(): void {
       preload: path.join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      // The guest desktop is an Electron <webview>: an iframe from file:// neither
+      // gets a JS context nor survives Chromium's cross-scheme navigation rules.
+      webviewTag: true,
     },
   });
   mainWindow = window;
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null;
   });
-  window.once('ready-to-show', () => window.show());
+  window.once('ready-to-show', () => {
+    window.maximize();
+    window.show();
+  });
   void window.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 

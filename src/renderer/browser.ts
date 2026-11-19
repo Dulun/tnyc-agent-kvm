@@ -13,7 +13,7 @@ function noVncUrl(raw: string): string {
   url.protocol = url.protocol === 'wss:' || url.protocol === 'https:' ? 'https:' : 'http:';
   if (!url.pathname.endsWith('/')) url.pathname += '/';
   url.pathname += 'vnc.html';
-  url.search = new URLSearchParams({ autoconnect: '1', resize: 'remote' }).toString();
+  url.search = new URLSearchParams({ autoconnect: '1', resize: 'scale', reconnect: '1', reconnect_delay: '1000' }).toString();
   return url.toString();
 }
 
@@ -65,14 +65,25 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
       current = src;
       urlLabelEl.textContent = src;
       urlLabelEl.title = src;
-      const frame = document.createElement('iframe');
+      const frame = document.createElement('webview') as HTMLElement & { src: string };
       frame.title = '访客桌面';
-      frame.setAttribute('allow', 'clipboard-read; clipboard-write');
-      frame.addEventListener('load', () => {
+      frame.setAttribute('allowpopups', '');
+      frame.addEventListener('dom-ready', () => {
         if (seq === loadSeq) overlayEl.hidden = true;
+        // The embedded page is a fixed-size remote desktop; scrollbars only
+        // eat pixels, so pin it to the pane.
+        void (frame as unknown as { executeJavaScript(code: string): Promise<unknown> })
+          .executeJavaScript(
+            "document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';" +
+              "window.scrollTo(0,0);",
+          )
+          .catch(() => undefined);
+      });
+      frame.addEventListener('did-fail-load', () => {
+        if (seq === loadSeq) showOverlay('访客桌面加载失败，请重试。', true);
       });
       frame.src = src;
-      bodyEl.querySelector('iframe')?.remove();
+      bodyEl.querySelector('webview')?.remove();
       bodyEl.append(frame);
     } catch (error) {
       if (seq !== loadSeq) return;
@@ -94,7 +105,7 @@ export function mountBrowser(app: AppApi, pane: HTMLElement): BrowserPane {
     reload: () => void load(),
     destroy: () => {
       loadSeq++;
-      bodyEl.querySelector('iframe')?.remove();
+      bodyEl.querySelector('webview')?.remove();
       if (tunnel) void app.closeTunnel(tunnel.url).catch(() => undefined);
     },
   };

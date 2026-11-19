@@ -112,7 +112,41 @@ export async function getProxyState(): Promise<ProxyState> {
   }
   const exitIp = fields.EXITIP && /^[0-9a-f:.]+$/i.test(fields.EXITIP) ? fields.EXITIP : null;
   const dnsMode: DnsMode = fields.DNSMODE === 'redir-host' ? 'redir-host' : 'fake-ip';
-  return { enabled: mihomoActive && node !== null, node, exitIp, mihomoActive, mode: 'v6', dnsMode };
+  const dial = node ? await nodeDial(node) : null;
+  return {
+    enabled: mihomoActive && node !== null,
+    node,
+    exitIp,
+    mihomoActive,
+    mode: 'v6',
+    dnsMode,
+    ...(dial ?? {}),
+  };
+}
+
+/** Dial target of a rendered node, read straight from the gateway config. */
+async function nodeDial(name: string): Promise<{ type?: string; server?: string; port?: number } | null> {
+  const res = await gwExec('sudo -n cat /etc/mihomo/config.yaml 2>/dev/null', { timeoutMs: 15_000 }).catch(() => null);
+  if (!res || res.code !== 0) return null;
+  const lines = res.stdout.split('\n');
+  const at = lines.findIndex((line) => {
+    const m = /^- name:\s*(.*)$/.exec(line.trim());
+    if (!m?.[1]) return false;
+    return m[1].replace(/^['"]|['"]$/g, '') === name;
+  });
+  if (at < 0) return null;
+  const block: Record<string, string> = {};
+  for (const line of lines.slice(at + 1)) {
+    if (/^-\s/.test(line)) break;
+    const m = /^\s{2}([a-z-]+):\s*(.*)$/.exec(line);
+    if (m?.[1] && m[2] !== undefined) block[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+  }
+  const port = block.port ? Number.parseInt(block.port, 10) : undefined;
+  return {
+    ...(block.type ? { type: block.type } : {}),
+    ...(block.server ? { server: block.server } : {}),
+    ...(Number.isFinite(port) ? { port } : {}),
+  };
 }
 
 /** Current mihomo DNS mode inside the gateway (fake-ip when unknown). */
