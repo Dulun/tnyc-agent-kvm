@@ -39,5 +39,14 @@
     "esbuild@0.24.2": true,
     "ssh2@1.17.0": true,
     "cpu-features@0.0.10": true
+  },
+  "homepage": "https://github.com/Dulun/tnyc-agent-kvm",
+  "author": {
+    "name": "Dulun",
+    "email": "Dulun@users.noreply.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Dulun/tnyc-agent-kvm.git"
   }
 }
