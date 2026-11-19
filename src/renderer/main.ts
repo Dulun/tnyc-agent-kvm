@@ -214,7 +214,7 @@ function mountShell(): void {
           });
           row.addEventListener('contextmenu', async (event) => {
             event.preventDefault();
-            const to = window.prompt('重命名浏览器配置', name)?.trim();
+            const to = (await askText('重命名浏览器配置', name))?.trim();
             if (!to || to === name) return;
             try {
               await api.browserRenameProfile(name, to);
@@ -238,7 +238,7 @@ function mountShell(): void {
     }
   };
   el(root, '#prof-add').addEventListener('click', async () => {
-    const name = window.prompt('新浏览器配置名（独立 cookie / 登录状态）', `browser-${Date.now().toString().slice(-4)}`)?.trim();
+    const name = (await askText('新浏览器配置名（独立 cookie / 登录状态）', `browser-${Date.now().toString().slice(-4)}`))?.trim();
     if (!name || !api) return;
     try {
       await api.browserUseProfile(name);
@@ -268,8 +268,9 @@ function mountShell(): void {
         });
         row.addEventListener('contextmenu', (event) => {
           event.preventDefault();
-          const next = window.prompt('重命名终端', tab.title)?.trim();
-          if (next) term?.renameTab(tab.id, next);
+          void askText('重命名终端', tab.title).then((next) => {
+            if (next?.trim()) term?.renameTab(tab.id, next.trim());
+          });
         });
         const close = document.createElement('button');
         close.type = 'button';
@@ -512,6 +513,46 @@ async function runInstance(action: 'start' | 'stop'): Promise<void> {
 }
 
 /* ---------- lifecycle ---------- */
+
+
+/** Electron has no window.prompt; this is the same thing without native dialogs. */
+function askText(title: string, value = ''): Promise<string | null> {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h2></h2>
+      <input class="modal-input" id="ask-input" />
+      <div class="modal-actions">
+        <span></span>
+        <span class="modal-buttons">
+          <button type="button" class="ghost" id="ask-cancel">取消</button>
+          <button type="button" class="primary" id="ask-ok">确定</button>
+        </span>
+      </div>
+    </div>`;
+  document.body.append(overlay);
+  const heading = overlay.querySelector('h2');
+  if (heading) heading.textContent = title;
+  const input = overlay.querySelector<HTMLInputElement>('#ask-input');
+  if (input) {
+    input.value = value;
+    input.focus();
+    input.select();
+  }
+  return new Promise<string | null>((resolve) => {
+    const done = (result: string | null): void => {
+      overlay.remove();
+      resolve(result);
+    };
+    overlay.querySelector('#ask-ok')?.addEventListener('click', () => done(input?.value.trim() ?? ''));
+    overlay.querySelector('#ask-cancel')?.addEventListener('click', () => done(null));
+    overlay.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') done(input?.value.trim() ?? '');
+      if (event.key === 'Escape') done(null);
+    });
+  });
+}
 
 let checkModal: HTMLElement | null = null;
 const checkRows = new Map<string, HTMLElement>();
