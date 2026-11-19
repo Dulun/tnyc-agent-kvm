@@ -43,6 +43,7 @@ export type RpcMethod =
   | 'browser.profiles'
   | 'browser.useProfile'
   | 'browser.renameProfile'
+  | 'browser.createProfile'
   | 'dns.get'
   | 'dns.set';
 
@@ -167,7 +168,10 @@ export interface SessionKillParams {
 
 export interface BrowserProfiles {
   current: string;
+  /** stable ids; the Chrome user-data dir is .chrome-<id> */
   profiles: string[];
+  /** display names, renaming never touches the running browser */
+  labels: Record<string, string>;
 }
 
 export interface TmuxSession {

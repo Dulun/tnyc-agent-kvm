@@ -64,7 +64,8 @@ export interface AppApi {
   sessionRename(from: string, to: string): Promise<void>;
   browserProfiles(): Promise<BrowserProfiles>;
   browserUseProfile(name: string): Promise<void>;
-  browserRenameProfile(from: string, to: string): Promise<void>;
+  browserRenameProfile(id: string, label: string): Promise<void>;
+  browserCreateProfile(label: string): Promise<void>;
   checkRun(params?: CheckParams): Promise<CheckResult>;
   guestExec(params: GuestExecParams): Promise<GuestExecResult>;
   guestBootstrap(): Promise<void>;
@@ -103,6 +104,7 @@ export const IPC = {
   browserProfiles: 'app:browserProfiles',
   browserUseProfile: 'app:browserUseProfile',
   browserRenameProfile: 'app:browserRenameProfile',
+  browserCreateProfile: 'app:browserCreateProfile',
   checkRun: 'app:checkRun',
   guestExec: 'app:guestExec',
   guestBootstrap: 'app:guestBootstrap',

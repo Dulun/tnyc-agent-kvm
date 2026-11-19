@@ -71,10 +71,31 @@ const HANDLERS: Record<RpcMethod, Handler> = {
     return {};
   },
   'browser.profiles': async () => {
-    const res = await guestExec(await cageVm(), 'cage-profile list; echo ---; cat /root/.cage-profile 2>/dev/null', 20_000);
-    const [list = '', current = ''] = res.out.split('---');
-    const profiles = list.split('\n').map((l) => l.trim()).filter(Boolean);
-    return { profiles, current: current.trim() || 'cage' };
+    const res = await guestExec(await cageVm(), 'cage-profile list', 20_000);
+    const profiles: string[] = [];
+    const labels: Record<string, string> = {};
+    let current = 'cage';
+    for (const raw of res.out.split('\n')) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.startsWith('--')) {
+        current = line.slice(2) || current;
+        continue;
+      }
+      const [id, ...rest] = line.split('|');
+      if (!id) continue;
+      profiles.push(id);
+      labels[id] = rest.join('|') || id;
+    }
+    return { profiles, labels, current };
+  },
+  'browser.createProfile': async (params) => {
+    const label = (params as { label?: unknown } | undefined)?.label;
+    if (typeof label !== 'string' || label.trim() === '' || label.length > 32) throw new AgentError(ERR.params, 'label is invalid');
+    const id = `p${Date.now().toString(36).slice(-6)}`;
+    const res = await guestExec(await cageVm(), `cage-profile create ${id} ${JSON.stringify(label)}`, 180_000);
+    if (res.code !== 0) throw new AgentError(ERR.generic, `profile create failed: ${res.out.slice(-160)}`);
+    return {};
   },
   'browser.useProfile': async (params) => {
     const name = (params as { name?: unknown } | undefined)?.name;
@@ -84,14 +105,11 @@ const HANDLERS: Record<RpcMethod, Handler> = {
     return {};
   },
   'browser.renameProfile': async (params) => {
-    const { from, to } = (params ?? {}) as { from?: unknown; to?: unknown };
-    if (typeof from !== 'string' || typeof to !== 'string' || !/^[\w.-]{1,32}$/.test(from) || !/^[\w.-]{1,32}$/.test(to)) {
-      throw new AgentError(ERR.params, 'profile names are invalid');
-    }
-    const cmd = `test -d /root/.chrome-${from} && mv /root/.chrome-${from} /root/.chrome-${to}` +
-      ` && if [ "$(cat /root/.cage-profile 2>/dev/null)" = "${from}" ]; then echo "${to}" > /root/.cage-profile; systemctl restart cage-browser; fi`;
-    const res = await guestExec(await cageVm(), cmd, 180_000);
-    if (res.code !== 0) throw new AgentError(ERR.generic, `profile rename failed: ${res.out.slice(-200)}`);
+    const { id, label } = (params ?? {}) as { id?: unknown; label?: unknown };
+    if (typeof id !== 'string' || !/^[\w.-]{1,32}$/.test(id)) throw new AgentError(ERR.params, 'profile id is invalid');
+    if (typeof label !== 'string' || label.trim() === '' || label.length > 32) throw new AgentError(ERR.params, 'label is invalid');
+    const res = await guestExec(await cageVm(), `cage-profile label ${id} ${JSON.stringify(label)}`, 20_000);
+    if (res.code !== 0) throw new AgentError(ERR.generic, `profile rename failed: ${res.out.slice(-160)}`);
     return {};
   },
   'guest.sessions': async () => {

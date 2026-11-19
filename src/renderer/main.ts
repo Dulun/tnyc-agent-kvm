@@ -193,12 +193,13 @@ function mountShell(): void {
       const info = await api.browserProfiles();
       profList.replaceChildren(
         ...info.profiles.map((name) => {
+          const labelText = info.labels[name] ?? name;
           const row = document.createElement('div');
           row.className = `sess-row${name === info.current ? ' active' : ''}`;
           const label = document.createElement('button');
           label.type = 'button';
           label.className = 'sess-open';
-          label.textContent = name === info.current ? `${name} · 使用中` : name;
+          label.textContent = labelText === name ? (name === info.current ? `${name} · 使用中` : name) : (name === info.current ? `${labelText} · 使用中` : labelText);
           label.addEventListener('click', async () => {
             if (name !== info.current) {
               label.textContent = `${name} · 切换中…`;
@@ -214,8 +215,8 @@ function mountShell(): void {
           });
           row.addEventListener('contextmenu', async (event) => {
             event.preventDefault();
-            const to = (await askText('重命名浏览器配置', name))?.trim();
-            if (!to || to === name) return;
+            const to = (await askText('重命名浏览器配置', labelText))?.trim();
+            if (!to || to === labelText) return;
             try {
               await api.browserRenameProfile(name, to);
             } catch (error) {
@@ -238,10 +239,10 @@ function mountShell(): void {
     }
   };
   el(root, '#prof-add').addEventListener('click', async () => {
-    const name = (await askText('新浏览器配置名（独立 cookie / 登录状态）', `browser-${Date.now().toString().slice(-4)}`))?.trim();
+    const name = (await askText('新浏览器配置名（独立 cookie / 登录状态）', `浏览器 ${new Date().toLocaleTimeString().slice(0, 5)}`))?.trim();
     if (!name || !api) return;
     try {
-      await api.browserUseProfile(name);
+      await api.browserCreateProfile(name);
       browserPane?.reload();
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
