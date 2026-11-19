@@ -2,6 +2,16 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { AppApi, TerminalHandle } from '../shared/ipc';
 
+const FONT_KEY = 'term.fontSize';
+const clampFont = (size: number): number => Math.min(22, Math.max(10, size));
+function readFontSize(): number {
+  const raw = Number.parseInt(localStorage.getItem(FONT_KEY) ?? '', 10);
+  return Number.isFinite(raw) ? clampFont(raw) : 13;
+}
+function writeFontSize(size: number): void {
+  localStorage.setItem(FONT_KEY, String(size));
+}
+
 interface Tab {
   id: string;
   term: Terminal;
@@ -25,6 +35,8 @@ export class TerminalTabs {
   private readonly strip: HTMLElement;
   private readonly empty: HTMLElement;
   private readonly observer: ResizeObserver;
+  private fontLabel: HTMLElement | null = null;
+  private fontSize = readFontSize();
   private readonly unData: () => void;
   private readonly unExit: () => void;
 
@@ -35,6 +47,11 @@ export class TerminalTabs {
     root.innerHTML = `
       <div class="tabstrip">
         <div class="tabs"></div>
+        <span class="term-font">
+          <button type="button" class="tab-new" id="term-font-down" title="缩小字号">A−</button>
+          <span class="term-font-size" id="term-font-size">13</span>
+          <button type="button" class="tab-new" id="term-font-up" title="放大字号">A+</button>
+        </span>
         <button type="button" class="tab-new" id="term-new">新会话</button>
       </div>
       <div class="term-body"><div class="term-empty">没有打开的终端 — 点击「新会话」</div></div>`;
@@ -47,6 +64,10 @@ export class TerminalTabs {
     this.empty = empty;
 
     strip.querySelector('#term-new')?.addEventListener('click', () => void this.open());
+    strip.querySelector('#term-font-down')?.addEventListener('click', () => this.bumpFont(-1));
+    strip.querySelector('#term-font-up')?.addEventListener('click', () => this.bumpFont(1));
+    this.fontLabel = strip.querySelector<HTMLElement>('#term-font-size');
+    if (this.fontLabel) this.fontLabel.textContent = String(this.fontSize);
 
     this.unData = app.onTerminalData((id, data) => {
       const tab = this.tabs.get(id);
@@ -85,7 +106,7 @@ export class TerminalTabs {
 
     const term = new Terminal({
       fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-      fontSize: 13,
+      fontSize: this.fontSize,
       lineHeight: 1.25,
       cursorBlink: true,
       scrollback: 8000,
@@ -147,6 +168,22 @@ export class TerminalTabs {
     this.updateEmpty();
   }
 
+  /** Terminal font size presets, persisted across sessions. */
+  private bumpFont(delta: number): void {
+    const next = clampFont(this.fontSize + delta);
+    if (next === this.fontSize) return;
+    this.fontSize = next;
+    writeFontSize(next);
+    if (this.fontLabel) this.fontLabel.textContent = String(next);
+    for (const tab of this.tabs.values()) {
+      tab.term.options.fontSize = next;
+      tab.cols = 0;
+      tab.rows = 0;
+    }
+    this.scheduleFit();
+    window.setTimeout(() => this.scheduleFit(), 120);
+  }
+
   /** Refit after layout changes made outside the terminal pane. */
   fitNow(): void {
     this.scheduleFit();
@@ -186,6 +223,10 @@ export class TerminalTabs {
     this.active = id;
     tab.term.focus();
     this.scheduleFit();
+    // The pane can still be mid-layout when a tab is created; one rAF measured a
+    // half-width container and left the terminal at ~55 columns for the session.
+    setTimeout(() => this.scheduleFit(), 80);
+    setTimeout(() => this.scheduleFit(), 350);
   }
 
   private close(id: string): void {
