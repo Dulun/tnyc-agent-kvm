@@ -96,9 +96,33 @@ install -d -m 755 /etc/opt/chrome/policies/managed
 printf '%s\n' '{"WebRtcIPHandlingPolicy": "disable_non_proxied_udp"}' > /etc/opt/chrome/policies/managed/tnyc.json
 chmod 644 /etc/opt/chrome/policies/managed/tnyc.json
 
+# No video calls in this cage: remove the API itself, so no page can start ICE.
+# A policy-only block would still let sites try; this makes it simply absent.
+install -d -m 755 /opt/cage/no-webrtc
+cat > /opt/cage/no-webrtc/manifest.json <<'WE'
+{
+  "manifest_version": 3,
+  "name": "no-webrtc",
+  "version": "1",
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["off.js"], "run_at": "document_start", "all_frames": true, "match_about_blank": true }
+  ]
+}
+WE
+cat > /opt/cage/no-webrtc/off.js <<'WE'
+(() => {
+  for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription', 'RTCIceCandidate']) {
+    try { Object.defineProperty(window, name, { value: undefined, configurable: false }); } catch { /* already locked down */ }
+  }
+})();
+WE
+chmod 644 /opt/cage/no-webrtc/manifest.json /opt/cage/no-webrtc/off.js
+
 exec google-chrome \
   --no-sandbox \
   --force-webrtc-ip-handling-policy=disable_non_proxied_udp \
+  --disable-extensions-except=/opt/cage/no-webrtc \
+  --load-extension=/opt/cage/no-webrtc \
   --test-type \
   --disable-gpu \
   --disable-dev-shm-usage \

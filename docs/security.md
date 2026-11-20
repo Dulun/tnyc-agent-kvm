@@ -26,6 +26,9 @@ the opposite of anonymity.
   down, the port is closed and the connection is refused.
 - UDP other than DNS is dropped: no STUN/TURN, QUIC, mDNS, NTP, or arbitrary
   UDP. This closes the usual WebRTC leak paths.
+- WebRTC is removed outright: a content script in `/opt/cage/no-webrtc` deletes
+  `RTCPeerConnection` and friends at `document_start`, so no page can start ICE.
+  Sites that need a call simply fail instead of quietly probing the network.
 - Private, loopback, and link-local destinations
   (`10/8`, `127/8`, `169.254/16`, `172.16/12`, `192.168/16`, `fc00::/7`,
   `fe80::/10`) are dropped before the redirect. Global mode ignores mihomo
