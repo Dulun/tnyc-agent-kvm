@@ -90,8 +90,15 @@ for _ in $(seq 1 100); do
 done
 pgrep -x openbox >/dev/null 2>&1 || openbox --sm-disable >/dev/null 2>&1 &
 pgrep -f 'websockify --web' >/dev/null 2>&1 || websockify --web /usr/share/novnc 127.0.0.1:6080 localhost:5900 &
+# WebRTC must never gather a non-proxied path: no host/srflx candidates leak,
+# and the kernel only lets UDP 443 to the node out anyway.
+install -d -m 755 /etc/opt/chrome/policies/managed
+printf '%s\n' '{"WebRtcIPHandlingPolicy": "disable_non_proxied_udp"}' > /etc/opt/chrome/policies/managed/tnyc.json
+chmod 644 /etc/opt/chrome/policies/managed/tnyc.json
+
 exec google-chrome \
   --no-sandbox \
+  --force-webrtc-ip-handling-policy=disable_non_proxied_udp \
   --test-type \
   --disable-gpu \
   --disable-dev-shm-usage \
