@@ -895,6 +895,9 @@ async function boot(): Promise<void> {
   api.onEvent(handleEvent);
   target = loadTarget();
   if (target) {
+    // Paint before the SSH handshake: a dead host must not look like a blank app.
+    mountShell();
+    if (viewEls) viewEls.workbench.innerHTML = `<div class="workbench"><p class="wb-sub">正在连接 ${esc(target.username)}@${esc(target.host)}…</p></div>`;
     try {
       showWorkbench(await api.connect(target));
       localStorage.setItem(TARGET_KEY, JSON.stringify(target));
