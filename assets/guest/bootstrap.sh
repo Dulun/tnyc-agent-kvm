@@ -89,6 +89,12 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 pgrep -x openbox >/dev/null 2>&1 || openbox --sm-disable >/dev/null 2>&1 &
+# Chrome only maximises if a window manager already owns the display; without
+# this wait a restart leaves it as a 10x10 stub.
+for _ in $(seq 1 50); do
+  xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q 'window id' && break
+  sleep 0.1
+done
 pgrep -f 'websockify --web' >/dev/null 2>&1 || websockify --web /usr/share/novnc 127.0.0.1:6080 localhost:5900 &
 exec google-chrome \
   --no-sandbox \
@@ -104,8 +110,6 @@ exec google-chrome \
   --no-first-run \
   --no-default-browser-check \
   --start-maximized \
-  --window-size=1920,1080 \
-  --window-position=0,0 \
   --force-device-scale-factor=2 \
   about:blank
 EOF
