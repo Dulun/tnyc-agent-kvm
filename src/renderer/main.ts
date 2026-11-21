@@ -1,6 +1,6 @@
 import '@xterm/xterm/css/xterm.css';
 import type { AppApi, HostTarget } from '../shared/ipc';
-import type { HostStatus } from '../shared/rpc';
+import type { HostStatus, ImageInfo } from '../shared/rpc';
 import { renderWizard } from './wizard';
 import { renderFooter } from './status';
 import { TerminalTabs } from './terminal';
@@ -465,6 +465,7 @@ function renderWorkbench(): void {
   const instance = status.instances[0];
   const running = instance?.state === 'running';
   const gatewayRunning = instance?.gatewayState === 'running';
+  if (imageList.length === 0 && imageOptions.includes('读取中')) void loadImages();
   const checkText = !check ? '尚未运行泄漏检查' : check.ok ? '网络检查通过' : '网络检查未通过';
   const user = target?.username ?? status.hostname;
   const host = target?.host ?? status.hostname;
@@ -496,7 +497,10 @@ function renderWorkbench(): void {
       </div>
       ${!instance ? `<div class="card wb-card" id="wb-create">
         <div class="wb-row"><span class="wb-icon">${icon('shield', 18)}</span><span class="wb-row-text"><b>创建环境</b><small>KVM 尚未创建</small></span></div>
-        <div class="wb-row"><input id="cr-image" placeholder="镜像路径，例 /var/lib/libvirt/images/focal.qcow2" value="${esc(lastImagePath)}"></div>
+        <div class="wb-row"><select id="cr-image-sel">${imageOptions}</select><button type="button" class="ghost" id="cr-image-refresh">刷新</button></div>
+        <div class="wb-row"><input id="cr-image" placeholder="或直接填镜像路径" value="${esc(lastImagePath)}"></div>
+        <div class="wb-row"><input id="cr-dl-url" placeholder="镜像下载地址 https://…/ubuntu.qcow2"><input id="cr-dl-name" placeholder="保存为 ubuntu.qcow2"></div>
+        <div class="wb-row"><span class="wb-row-text"><small id="cr-dl-state">${esc(downloadState)}</small></span><button type="button" class="ghost" id="cr-dl-go" ${downloadBusy ? 'disabled' : ''}>下载镜像</button></div>
         <div class="wb-row"><input id="cr-vcpus" type="number" min="1" value="4"><input id="cr-mem" type="number" min="1024" step="1024" value="8192"></div>
         <div class="wb-row"><input id="cr-server" placeholder="节点地址"><input id="cr-port" type="number" value="443" placeholder="端口"></div>
         <div class="wb-row"><input id="cr-password" type="password" placeholder="节点密码"><input id="cr-sni" placeholder="SNI（可选）"></div>
@@ -518,6 +522,13 @@ function renderWorkbench(): void {
   viewEls.workbench.querySelector('#wb-gw-on')?.addEventListener('click', () => void runVmPower('gateway', 'start'));
   viewEls.workbench.querySelector('#wb-gw-off')?.addEventListener('click', () => void runVmPower('gateway', 'stop'));
   viewEls.workbench.querySelector('#wb-gw-core')?.addEventListener('click', () => void runCoreRestart());
+  viewEls.workbench.querySelector('#cr-image-refresh')?.addEventListener('click', () => void loadImages());
+  viewEls.workbench.querySelector('#cr-dl-go')?.addEventListener('click', () => void runImageDownload());
+  viewEls.workbench.querySelector('#cr-image-sel')?.addEventListener('change', (event) => {
+    const sel = event.target as HTMLSelectElement;
+    const input = document.querySelector('#cr-image') as HTMLInputElement | null;
+    if (input && sel.value) input.value = sel.value;
+  });
   viewEls.workbench.querySelector('#cr-go')?.addEventListener('click', () => void runCreate());
 }
 
@@ -579,6 +590,44 @@ async function runCheck(): Promise<void> {
 }
 
 let powerBusy = false;
+let imageList: ImageInfo[] = [];
+let imageOptions = '<option value="">（读取中…）</option>';
+let downloadBusy = false;
+let downloadState = '';
+
+async function loadImages(): Promise<void> {
+  if (!api) return;
+  try {
+    imageList = await api.imagesList();
+    imageOptions = imageList.length
+      ? imageList.map((i) => `<option value="${esc(i.path)}">${esc(i.name)} · ${(i.sizeBytes / 1e9).toFixed(1)} GB</option>`).join('')
+      : '<option value="">（镜像目录为空）</option>';
+  } catch (failure) {
+    imageOptions = `<option value="">读取失败：${esc(messageOf(failure))}</option>`;
+  }
+  if (view === 'workbench') renderWorkbench();
+}
+
+async function runImageDownload(): Promise<void> {
+  if (!api || downloadBusy) return;
+  const url = (document.querySelector('#cr-dl-url') as HTMLInputElement | null)?.value.trim() ?? '';
+  const name = (document.querySelector('#cr-dl-name') as HTMLInputElement | null)?.value.trim() ?? '';
+  if (!url || !name) { errorMessage = '下载地址和保存文件名都要填'; paint(); return; }
+  downloadBusy = true;
+  downloadState = '连接中…';
+  renderWorkbench();
+  try {
+    const info = await api.imageDownload(url, name);
+    downloadState = `完成：${info.name}（${(info.sizeBytes / 1e9).toFixed(1)} GB）`;
+    await loadImages();
+  } catch (failure) {
+    errorMessage = messageOf(failure);
+    downloadState = `失败：${messageOf(failure)}`;
+  } finally {
+    downloadBusy = false;
+    if (view === 'workbench') renderWorkbench();
+  }
+}
 let provisionBusy = false;
 let provisionStep = '';
 let lastImagePath = '';
@@ -859,6 +908,14 @@ function paintCheckEvent(event: string, data: unknown): void {
 function handleEvent(event: string, data: unknown): void {
   if (event.startsWith('check.')) {
     paintCheckEvent(event, data);
+    return;
+  }
+  if (event === 'image.progress') {
+    const d = data as { written?: number; total?: number } | null;
+    const mb = (n?: number) => ((n ?? 0) / 1e6).toFixed(0);
+    downloadState = d?.total ? `${mb(d.written)} / ${mb(d.total)} MB` : `${mb(d?.written)} MB`;
+    const el = document.querySelector('#cr-dl-state');
+    if (el) el.textContent = downloadState;
     return;
   }
   if (event.startsWith('provision.')) {

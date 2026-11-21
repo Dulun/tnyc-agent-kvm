@@ -22,6 +22,7 @@ import {
 import { guestExec } from '../lib/ssh';
 import { guestBootstrap, provisionPlan, provisionRun } from '../lib/provision';
 import { dnsSet, proxySet, restartCore } from '../lib/proxy';
+import { downloadImage, listImages } from '../lib/images';
 import { AgentError, ERR, type Ctx } from '../lib/types';
 import { tail } from '../lib/util';
 
@@ -48,6 +49,11 @@ const HANDLERS: Record<RpcMethod, Handler> = {
   'proxy.get': () => getProxyState(),
   'proxy.set': (params, ctx) => proxySet(params as ProxySetParams, ctx),
   'gateway.restartCore': () => restartCore(),
+  'images.list': () => listImages(),
+  'images.download': (params, ctx) => {
+    const p = params as { url?: unknown; name?: unknown } | null;
+    return downloadImage(p?.url, p?.name, ctx);
+  },
   'dns.get': () => getDnsMode(),
   'dns.set': (params) => dnsSet(params),
   'check.run': async (params, ctx) => {
@@ -165,6 +171,7 @@ const MUTATING: Partial<Record<RpcMethod, true>> = {
   'dns.set': true,
   'vm.power': true,
   'gateway.restartCore': true,
+  'images.download': true,
 };
 let busy: RpcMethod | null = null;
 

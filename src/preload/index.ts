@@ -39,6 +39,8 @@ const api: AppApi = {
   instanceStop: (id) => ipcRenderer.invoke(IPC.instanceStop, id),
   vmPower: (target, action) => ipcRenderer.invoke(IPC.vmPower, target, action),
   gatewayRestartCore: () => ipcRenderer.invoke(IPC.gatewayRestartCore),
+  imagesList: () => ipcRenderer.invoke(IPC.imagesList),
+  imageDownload: (url, name) => ipcRenderer.invoke(IPC.imageDownload, url, name),
   instances: () => ipcRenderer.invoke(IPC.instances),
 
   terminalOpen: (opts) => ipcRenderer.invoke(IPC.terminalOpen, opts),

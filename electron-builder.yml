@@ -23,6 +23,8 @@ mac:
     - zip
   hardenedRuntime: true
 linux:
+  executableArgs:
+    - --no-sandbox
   target:
     - AppImage
     - deb

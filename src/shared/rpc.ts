@@ -32,6 +32,8 @@ export type RpcMethod =
   | 'instance.stop'
   | 'vm.power'
   | 'gateway.restartCore'
+  | 'images.list'
+  | 'images.download'
   | 'provision.plan'
   | 'provision.run'
   | 'proxy.get'
@@ -151,6 +153,18 @@ export interface ProxyStepEvent {
 }
 
 /** Payloads */
+export interface ImageInfo {
+  name: string;
+  path: string;
+  sizeBytes: number;
+  modified: number;
+}
+
+export interface ImageDownloadParams {
+  url: string;
+  name: string;
+}
+
 export interface VmPowerParams {
   target: 'cage' | 'gateway';
   action: 'start' | 'stop';

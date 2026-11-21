@@ -8,6 +8,7 @@ import type {
   GuestExecParams,
   GuestExecResult,
   HostStatus,
+  ImageInfo,
   Instance,
   NodeConfig,
   ProvisionPlan,
@@ -42,6 +43,8 @@ const RPC_METHODS: Record<RpcMethod, true> = {
   'instance.stop': true,
   'vm.power': true,
   'gateway.restartCore': true,
+  'images.list': true,
+  'images.download': true,
   'provision.plan': true,
   'provision.run': true,
   'proxy.get': true,
@@ -333,6 +336,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle(IPC.gatewayRestartCore, async (): Promise<void> => {
     await requireSession().rpc.request('gateway.restartCore', undefined, 120_000);
+  });
+
+  ipcMain.handle(IPC.imagesList, (): Promise<ImageInfo[]> =>
+    requireSession().rpc.request<ImageInfo[]>('images.list'),
+  );
+
+  ipcMain.handle(IPC.imageDownload, (_event, url: unknown, name: unknown): Promise<ImageInfo> => {
+    if (typeof url !== 'string' || typeof name !== 'string') throw new Error('url and name are required');
+    return requireSession().rpc.request<ImageInfo>('images.download', { url, name }, 0);
   });
 
   ipcMain.handle(IPC.instances, async (): Promise<Instance[]> => {

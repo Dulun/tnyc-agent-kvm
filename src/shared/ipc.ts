@@ -1,4 +1,5 @@
 import type {
+  ImageInfo,
   CheckParams,
   CheckResult,
   GuestExecParams,
@@ -75,6 +76,8 @@ export interface AppApi {
   instanceStop(id: string): Promise<void>;
   vmPower(target: 'cage' | 'gateway', action: 'start' | 'stop'): Promise<void>;
   gatewayRestartCore(): Promise<void>;
+  imagesList(): Promise<ImageInfo[]>;
+  imageDownload(url: string, name: string): Promise<ImageInfo>;
   instances(): Promise<Instance[]>;
 
   terminalOpen(opts: TerminalOptions): Promise<TerminalHandle>;
@@ -116,6 +119,8 @@ export const IPC = {
   instanceStop: 'app:instanceStop',
   vmPower: 'app:vmPower',
   gatewayRestartCore: 'app:gatewayRestartCore',
+  imagesList: 'app:imagesList',
+  imageDownload: 'app:imageDownload',
   instances: 'app:instances',
   terminalOpen: 'term:open',
   terminalWrite: 'term:write',
