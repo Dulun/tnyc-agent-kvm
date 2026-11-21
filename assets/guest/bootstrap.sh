@@ -90,39 +90,9 @@ for _ in $(seq 1 100); do
 done
 pgrep -x openbox >/dev/null 2>&1 || openbox --sm-disable >/dev/null 2>&1 &
 pgrep -f 'websockify --web' >/dev/null 2>&1 || websockify --web /usr/share/novnc 127.0.0.1:6080 localhost:5900 &
-# WebRTC must never gather a non-proxied path: no host/srflx candidates leak,
-# and the kernel only lets UDP 443 to the node out anyway.
-install -d -m 755 /etc/opt/chrome/policies/managed
-printf '%s\n' '{"WebRtcIPHandlingPolicy": "disable_non_proxied_udp"}' > /etc/opt/chrome/policies/managed/tnyc.json
-chmod 644 /etc/opt/chrome/policies/managed/tnyc.json
-
-# No video calls in this cage: remove the API itself, so no page can start ICE.
-# A policy-only block would still let sites try; this makes it simply absent.
-install -d -m 755 /opt/cage/no-webrtc
-cat > /opt/cage/no-webrtc/manifest.json <<'WE'
-{
-  "manifest_version": 3,
-  "name": "no-webrtc",
-  "version": "1",
-  "content_scripts": [
-    { "matches": ["<all_urls>"], "js": ["off.js"], "run_at": "document_start", "all_frames": true, "match_about_blank": true }
-  ]
-}
-WE
-cat > /opt/cage/no-webrtc/off.js <<'WE'
-(() => {
-  for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription', 'RTCIceCandidate']) {
-    try { Object.defineProperty(window, name, { value: undefined, configurable: false }); } catch { /* already locked down */ }
-  }
-})();
-WE
-chmod 644 /opt/cage/no-webrtc/manifest.json /opt/cage/no-webrtc/off.js
-
 exec google-chrome \
   --no-sandbox \
   --force-webrtc-ip-handling-policy=disable_non_proxied_udp \
-  --disable-extensions-except=/opt/cage/no-webrtc \
-  --load-extension=/opt/cage/no-webrtc \
   --test-type \
   --disable-gpu \
   --disable-dev-shm-usage \
@@ -222,6 +192,85 @@ PF
 chmod 0755 /usr/local/bin/cage-profile
 
 # --- unit -------------------------------------------------------------------
+# WebRTC must never gather a non-proxied path: no host/srflx candidates leak,
+# and the kernel only lets UDP 443 to the node out anyway.
+install -d -m 755 /etc/opt/chrome/policies/managed
+printf '%s\n' '{"WebRtcIPHandlingPolicy": "disable_non_proxied_udp"}' > /etc/opt/chrome/policies/managed/tnyc.json
+chmod 644 /etc/opt/chrome/policies/managed/tnyc.json
+
+# No video calls in this cage: remove the API itself. Chrome 158 no longer loads
+# unpacked extensions from the command line, so the script is injected over CDP
+# and re-applied whenever the page target changes.
+install -d -m 755 /opt/cage/no-webrtc
+cat > /opt/cage/no-webrtc/off.js <<'WE'
+(() => {
+  for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'RTCSessionDescription', 'RTCIceCandidate']) {
+    try { Object.defineProperty(window, name, { value: undefined, configurable: false }); } catch { /* already locked down */ }
+  }
+})();
+WE
+cat > /opt/cage/no-webrtc/apply.mjs <<'WE'
+// Keeps RTCPeerConnection absent in whatever page the kiosk is showing.
+// Two things matter here: the socket must stay open (a dropped debugger session
+// loses the new-document registration), and every tick re-evaluates in the live
+// document so a page that loads between ticks is still covered.
+import { readFileSync } from 'node:fs';
+const source = readFileSync('/opt/cage/no-webrtc/off.js', 'utf8');
+const live = new Map();
+
+async function targets() {
+  try {
+    const res = await fetch('http://127.0.0.1:9222/json');
+    return (await res.json()).filter((t) => t.type === 'page');
+  } catch {
+    return [];
+  }
+}
+
+async function attach(page) {
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  let id = 0;
+  const pending = new Map();
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    const done = pending.get(msg.id);
+    if (done) { pending.delete(msg.id); done(msg); }
+  };
+  const call = (method, params = {}) => new Promise((res) => {
+    const i = ++id;
+    pending.set(i, res);
+    ws.send(JSON.stringify({ id: i, method, params }));
+  });
+  await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+  await call('Page.enable');
+  await call('Page.addScriptToEvaluateOnNewDocument', { source });
+  await call('Runtime.evaluate', { expression: source });
+  ws.onclose = () => live.delete(page.id);
+  live.set(page.id, call);
+}
+
+setInterval(async () => {
+  for (const page of await targets()) {
+    if (!live.has(page.id)) await attach(page).catch(() => live.delete(page.id));
+    await live.get(page.id)?.('Runtime.evaluate', { expression: source }).catch(() => live.delete(page.id));
+  }
+}, 3000);
+WE
+chmod 644 /opt/cage/no-webrtc/off.js /opt/cage/no-webrtc/apply.mjs
+
+cat > /etc/systemd/system/cage-webrtc-off.service <<'WE'
+[Unit]
+Description=Cage: keep RTCPeerConnection absent in Chrome
+After=cage-browser.service
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/node /opt/cage/no-webrtc/apply.mjs
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+WE
+
 cat >/etc/systemd/system/cage-browser.service <<'EOF'
 [Unit]
 Description=Cage browser stack (Xvfb :99, Chrome kiosk, x11vnc, noVNC)
@@ -242,10 +291,11 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable cage-browser.service >/dev/null
+systemctl enable cage-browser.service cage-webrtc-off.service >/dev/null
 
 if [ "$START" -eq 1 ]; then
   systemctl restart cage-browser.service
+  systemctl restart cage-webrtc-off.service
   echo "cage-browser started; noVNC on 127.0.0.1:6080, VNC on localhost:5900 (no password)"
 else
   echo "cage-browser enabled; start it with: systemctl start cage-browser"
