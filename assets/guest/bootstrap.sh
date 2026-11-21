@@ -104,6 +104,8 @@ exec google-chrome \
   --no-first-run \
   --no-default-browser-check \
   --start-maximized \
+  --window-size=1920,1080 \
+  --window-position=0,0 \
   --force-device-scale-factor=2 \
   about:blank
 EOF
