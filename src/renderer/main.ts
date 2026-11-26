@@ -138,7 +138,8 @@ function mountShell(): void {
         <div class="sb-spacer"></div>        <div class="health" id="health"></div>
         <div class="user-card">
           <span class="avatar">${esc(initial)}</span>
-          <span class="user-text"><b>本机账户</b><small>远程主机</small></span>
+          <span class="user-text"><b>${esc(target?.username ?? '本机')}@${esc(target?.host ?? '')}</b><small>${target?.kind === 'local' ? '本机' : '远程主机'}</small></span>
+          <button type="button" class="icon-btn" id="open-wizard" title="连接/切换主机" aria-label="连接/切换主机">${icon('plus', 16)}</button>
           <button type="button" class="icon-btn" id="open-settings" title="设置" aria-label="设置">${icon('gear', 16)}</button>
         </div>
       </aside>
@@ -187,6 +188,7 @@ function mountShell(): void {
   });
 
   el(root, '#open-settings').addEventListener('click', () => setView('settings'));
+  el(root, '#open-wizard').addEventListener('click', () => openHostWizard());
 
   const profList = el<HTMLElement>(root, '#prof-list');
   const refreshProfiles = async (): Promise<void> => {
@@ -498,7 +500,14 @@ function renderWorkbench(): void {
           <button type="button" class="primary" id="wb-new-term">新建终端</button>
         </div>
       </div>
-      ${!instance ? `<div class="card wb-card" id="wb-create">
+${instance ? `<div class="card wb-card" id="wb-create">
+        <div class="wb-row">
+          <span class="wb-icon">${icon('shield', 18)}</span>
+          <span class="wb-row-text"><b>创建环境</b><small>这台主机已有一套实例（${esc(instance.name)}）；一台主机只支持一套 cage + gateway</small></span>
+          <button type="button" class="ghost" id="wb-create-host">连接其他主机新建</button>
+          <button type="button" class="ghost" id="wb-create-again" ${deleteBusy ? 'disabled' : ''}>${deleteBusy ? '删除中…' : '删除后可新建'}</button>
+        </div>
+      </div>` : `<div class="card wb-card" id="wb-create">
         <div class="wb-row"><span class="wb-icon">${icon('shield', 18)}</span><span class="wb-row-text"><b>创建环境</b><small>KVM 尚未创建</small></span></div>
         <div class="wb-row"><select id="cr-image-sel">${imageOptions}</select><button type="button" class="ghost" id="cr-image-refresh">刷新</button></div>
         <div class="wb-row"><input id="cr-image" placeholder="自定义镜像路径（上面没选时使用）" value="${esc(lastImagePath)}"></div>
@@ -508,7 +517,7 @@ function renderWorkbench(): void {
         <div class="wb-row"><input id="cr-server" placeholder="节点地址"><input id="cr-port" type="number" value="443" placeholder="端口"></div>
         <div class="wb-row"><input id="cr-password" type="password" placeholder="节点密码"><input id="cr-sni" placeholder="SNI（可选）"></div>
         <div class="wb-row"><span class="wb-row-text"><small id="cr-state">${esc(provisionStep)}</small></span><button type="button" class="primary" id="cr-go" ${provisionBusy ? 'disabled' : ''}>创建</button></div>
-      </div>` : ''}
+      </div>`}
       <div class="wb-actions">
         <button type="button" class="ghost" id="wb-check" ${checking ? 'disabled' : ''}>${checking ? '检查中…' : '运行泄漏检查'}</button>
         <button type="button" class="ghost" id="wb-browser">打开浏览器</button>
@@ -526,6 +535,8 @@ function renderWorkbench(): void {
   viewEls.workbench.querySelector('#wb-gw-off')?.addEventListener('click', () => void runVmPower('gateway', 'stop'));
   viewEls.workbench.querySelector('#wb-gw-core')?.addEventListener('click', () => void runCoreRestart());
   viewEls.workbench.querySelector('#wb-delete')?.addEventListener('click', () => void runDelete());
+  viewEls.workbench.querySelector('#wb-create-again')?.addEventListener('click', () => void runDelete());
+  viewEls.workbench.querySelector('#wb-create-host')?.addEventListener('click', () => openHostWizard());
   viewEls.workbench.querySelector('#cr-image-refresh')?.addEventListener('click', () => void loadImages());
   viewEls.workbench.querySelector('#cr-dl-go')?.addEventListener('click', () => void runImageDownload());
   viewEls.workbench.querySelector('#cr-go')?.addEventListener('click', () => void runCreate());
@@ -981,6 +992,21 @@ function handleEvent(event: string, data: unknown): void {
     status = data;
     paint();
   }
+}
+
+/** Leave the current host and reopen the connect form (switch or add a host). */
+function openHostWizard(): void {
+  if (!api) return;
+  void api.disconnect().catch(() => undefined);
+  status = null;
+  maintenance = null;
+  errorMessage = null;
+  busy = false;
+  renderWizard(root, target, api, (connected, initial) => {
+    target = connected;
+    localStorage.setItem(TARGET_KEY, JSON.stringify(connected));
+    showWorkbench(initial);
+  });
 }
 
 function showWorkbench(initial: HostStatus): void {

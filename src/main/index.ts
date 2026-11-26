@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, Menu } from 'electron';
 import path from 'node:path';
 import { disposeIpc, registerIpc } from './ipc';
 import { initAppProxy } from './app-proxy';
@@ -33,6 +33,10 @@ function createWindow(): void {
   });
   void window.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
+
+// Linux/Windows: the File/Edit/View/… menubar belongs to the browser chrome, not
+// an app whose whole UI is the renderer. macOS keeps its app menu for Cmd+Q etc.
+if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
 
 void app.whenReady().then(async () => {
   // a saved manual proxy must be active before the first download; a broken
