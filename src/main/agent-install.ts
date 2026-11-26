@@ -143,7 +143,7 @@ export async function ensureAgent(conn: TargetConnection): Promise<{ agentPath: 
   try {
     local = await readFile(localPath);
   } catch {
-    throw new Error(`Local agent bundle missing (${localPath}); run npm run build first`);
+    throw new Error(`Local agent bundle missing (${localPath}); run pnpm run build first`);
   }
 
   const sftp = await conn.sftp();

@@ -1,0 +1,12 @@
+# Single-package repo. pnpm >= 11 replaced onlyBuiltDependencies with
+# allowBuilds: a package builds only when it is explicitly allowed. electron
+# needs its postinstall to fetch the binary, esbuild to place its platform
+# binary. ssh2's cpu-features would need a compiler and is optional, so it is
+# denied instead of left "unreviewed" (that is ERR_PNPM_IGNORED_BUILDS).
+packages:
+  - "."
+allowBuilds:
+  electron: true
+  esbuild: true
+  ssh2: false
+  cpu-features: false

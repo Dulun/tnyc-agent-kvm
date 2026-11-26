@@ -21,6 +21,8 @@ the cage is offline. There is **no direct-connect switch, by design**.
 
 - **Host**: Ubuntu 22.04+ (22.04 or 24.04), KVM/libvirt, `virt-install`,
   `cloud-localds`, `qemu-img`, `nftables`, OpenSSH server.
+- **pnpm 11+** (the repo pins `packageManager: pnpm@12.18.0`; build
+  approvals live in `pnpm-workspace.yaml` → `allowBuilds`)
 - **Node.js 20+ on the host** — the uploaded agent is run as
   `node ~/.local/share/tnyc-agent-kvm/agent.cjs`.
 - A user reachable over SSH **with keys**; it needs passwordless sudo (or
@@ -54,9 +56,9 @@ the cage is offline. There is **no direct-connect switch, by design**.
 2. **Build and run the app**
 
    ```bash
-   npm ci
-   npm run build      # bundles main, preload, renderer and agent/agent.cjs
-   npm start          # or: npm run dist
+   pnpm install
+   pnpm run build     # bundles main, preload, renderer and agent/agent.cjs
+   pnpm start         # or: pnpm run dist
    ```
 
 3. **Connect a host** in the app: hostname/IP, port, user, private key. The
@@ -109,7 +111,7 @@ provisioning flow — image download, both VMs, bootstrap, checks.
 
 - macOS 15+ asks for **Local Network** permission on first SSH connect. An unsigned build gets
   denied silently and every LAN connection fails with `EHOSTUNREACH` (Tailscale addresses still work).
-  `npm run pack:mac` ad-hoc signs the bundle, which makes the prompt appear; approve it under
+  `pnpm run pack:mac` ad-hoc signs the bundle, which makes the prompt appear; approve it under
   System Settings → Privacy & Security → Local Network.
 - Distribution builds need a Developer ID certificate and notarisation; the ad-hoc signature is
   only for local use.
