@@ -61,6 +61,23 @@ the cage is offline. There is **no direct-connect switch, by design**.
    pnpm start         # or: pnpm run dist
    ```
 
+   If `pnpm install` seems to hang on `electron: Running...`, the Electron
+   binary download (GitHub releases, ~110 MB) is stuck. It honours the usual
+   proxy variables; on a restricted network use a mirror or skip the download:
+
+   ```bash
+   export ELECTRON_GET_USE_PROXY=1 HTTPS_PROXY=http://127.0.0.1:7897
+   export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+   pnpm install
+   # still stuck? then:
+   ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install
+   curl -L -o /tmp/electron.zip \
+     "$ELECTRON_MIRROR/33.4.11/electron-v33.4.11-darwin-arm64.zip"
+   mkdir -p node_modules/electron/dist
+   ditto -x -k /tmp/electron.zip node_modules/electron/dist   # Linux: unzip -o -d
+   printf electron > node_modules/electron/path.txt
+   ```
+
 3. **Connect a host** in the app: hostname/IP, port, user, private key. The
    app uploads `agent.cjs` and checks the host (libvirt, qemu, nft, node,
    base image, disk space).
