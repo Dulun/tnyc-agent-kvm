@@ -1,0 +1,27 @@
+<!--
+  Canonical target for libvirt's "default" network with IPv6 for the gateway.
+
+  Provisioning prefers transforming `virsh net-dumpxml default` in place
+  (ensureDefaultNetworkV6), never overwriting the host's network blindly.
+  This file is the fallback when dumpxml is unavailable: define it by hand
+  with `virsh net-define <this file>` and `virsh net-start default`.
+
+  With these two entries libvirt itself assigns fd00:3c6a:484c:c7ee:122::1/64
+  to virbr0, enables net.ipv6.conf.all.forwarding and installs the NAT66
+  masquerade. No host relay script or systemd unit is involved.
+-->
+<network>
+  <name>default</name>
+  <forward mode='nat'>
+    <nat ipv6='yes'>
+      <port start='1024' end='65535'/>
+    </nat>
+  </forward>
+  <bridge name='virbr0' stp='on' delay='0'/>
+  <ip address='192.168.122.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.122.2' end='192.168.122.254'/>
+    </dhcp>
+  </ip>
+  <ip family='ipv6' address='fd00:3c6a:484c:c7ee:122::1' prefix='64'/>
+</network>

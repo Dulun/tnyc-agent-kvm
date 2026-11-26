@@ -28,7 +28,9 @@ the cage is offline. There is **no direct-connect switch, by design**.
 - An Ubuntu cloud image, e.g.
   `/var/lib/libvirt/images/noble-base.qcow2` (Ubuntu 24.04 cloud image).
 - One reachable **hysteria2** node. The reference setup uses an IPv6-only node,
-  which requires the host to have working IPv6 (ULA + NAT66 is supported).
+  which requires the host to have working IPv6: the app declares the gateway's
+  ULA and NAT66 on the libvirt `default` network (`<nat ipv6='yes'/>`, needs
+  libvirt >= 6.5), so libvirt — not a relay unit — owns IPv6 forwarding.
 
 ## 5-minute quickstart
 
@@ -61,13 +63,19 @@ the cage is offline. There is **no direct-connect switch, by design**.
    app uploads `agent.cjs` and checks the host (libvirt, qemu, nft, node,
    base image, disk space).
 
-4. **Provision** with the image path and the hysteria2 node (server, port,
-   password, SNI, obfs, fingerprint). The app creates `cage-lan`, boots the
-   gateway, installs mihomo + nft, and creates the cage.
+4. **Provision** by choosing an image from the list, typing a custom path, or
+   downloading one through the app proxy — then the hysteria2 node (server,
+   port, password, SNI, obfs, fingerprint). The app creates `cage-lan`, enables
+   IPv6 on the `default` network, boots the gateway, installs mihomo + nft, and
+   creates the cage.
 
 5. **Bootstrap and open the cage**: run *guest bootstrap* (installs Xvfb,
    Chrome, x11vnc, noVNC), then open a terminal or the browser view. Full
    check: run the leak check and expect every item to pass.
+6. **Changing the node requires everything off.** The agent refuses a switch
+   while the cage or gateway runs; it boots the gateway only to write the
+   config and verify it, then powers it off again. The cage — the only source
+   of user traffic — is down for the whole switch.
 
 Manual equivalents for the embedded assets live in `assets/` (see below); the
 gateway and cage cloud-init files are templates with `{{PLACEHOLDER}}` values.
@@ -90,6 +98,12 @@ Four independent layers, each fail-closed:
    has no direct-connect switch**: there is no toggle that bypasses the proxy.
 
 See `docs/security.md` for the threat model and its limits.
+
+## macOS vs Linux
+
+On macOS the app only connects to a remote host over SSH. On Linux it can also
+run the same agent locally (`本机` target, no sshd/key needed) and do the whole
+provisioning flow — image download, both VMs, bootstrap, checks.
 
 ## macOS notes
 

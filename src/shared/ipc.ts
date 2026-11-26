@@ -19,6 +19,12 @@ import type {
 export interface HostTarget {
   id: string;
   label: string;
+  /**
+   * `ssh` (default) reaches a remote host; `local` runs the same agent as a
+   * child process on this machine (only offered when the app runs on Linux).
+   * For `local`, host/port/username are unused placeholders.
+   */
+  kind?: 'ssh' | 'local';
   host: string;
   port: number;
   username: string;
@@ -28,6 +34,19 @@ export interface HostTarget {
   jump?: { host: string; port: number; username: string; keyPath?: string }[];
   /** instance id this target manages, if the host already has one */
   instanceId?: string;
+  /** last node the user saved for this host; prefills the node editor */
+  node?: NodeConfig;
+}
+
+/**
+ * App-level outbound proxy, like the one in Telegram: when set, the app's own
+ * traffic (image downloads, every Electron session request) goes through it.
+ * `system` means "no proxy" — Chromium then uses the OS settings.
+ */
+export interface AppProxyConfig {
+  mode: 'system' | 'manual';
+  /** http://, https:// or socks5:// URL, optionally with user:pass@ */
+  url?: string;
 }
 
 export interface TerminalOptions {
@@ -74,11 +93,16 @@ export interface AppApi {
 
   instanceStart(id: string): Promise<void>;
   instanceStop(id: string): Promise<void>;
+  instanceDelete(id: string, removeDisks?: boolean): Promise<void>;
   vmPower(target: 'cage' | 'gateway', action: 'start' | 'stop'): Promise<void>;
   gatewayRestartCore(): Promise<void>;
   imagesList(): Promise<ImageInfo[]>;
+  /** downloaded by the app through the configured app proxy, then uploaded */
   imageDownload(url: string, name: string): Promise<ImageInfo>;
   instances(): Promise<Instance[]>;
+
+  appProxyGet(): Promise<AppProxyConfig>;
+  appProxySet(config: AppProxyConfig): Promise<AppProxyConfig>;
 
   terminalOpen(opts: TerminalOptions): Promise<TerminalHandle>;
   terminalWrite(id: string, data: string): void;
@@ -117,11 +141,14 @@ export const IPC = {
   guestBootstrap: 'app:guestBootstrap',
   instanceStart: 'app:instanceStart',
   instanceStop: 'app:instanceStop',
+  instanceDelete: 'app:instanceDelete',
   vmPower: 'app:vmPower',
   gatewayRestartCore: 'app:gatewayRestartCore',
   imagesList: 'app:imagesList',
   imageDownload: 'app:imageDownload',
   instances: 'app:instances',
+  appProxyGet: 'app:appProxyGet',
+  appProxySet: 'app:appProxySet',
   terminalOpen: 'term:open',
   terminalWrite: 'term:write',
   terminalResize: 'term:resize',

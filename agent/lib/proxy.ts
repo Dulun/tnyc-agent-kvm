@@ -1,9 +1,8 @@
 /** mihomo config rendering and the proxy.set state machine. */
 import { readFileSync } from 'node:fs';
 import type { DnsMode, NodeConfig, ProxySetParams, ProxyStep } from '../../src/shared/rpc';
-import { runCheck } from './check';
 import { gwOk, gwSudo, gwSudoOk, gwSudoScript, waitForGateway } from './ssh';
-import { findInstance, startInstance, stopInstance } from './status';
+import { findInstance, vmPower, vmStates } from './status';
 import { AgentError, ERR, type Ctx } from './types';
 import { findAsset, sleep, sq, tail, yamlScalar } from './util';
 
@@ -262,39 +261,26 @@ export async function proxySet(params: ProxySetParams, ctx: Ctx): Promise<void> 
     );
   }
 
-  step(ctx, 'draining', 'stopping cage');
-  try {
-    await stopInstance(rec.id);
-  } catch (err) {
-    step(ctx, 'rollback', (err as Error).message, false);
-    throw err instanceof AgentError ? err : new AgentError(ERR.generic, (err as Error).message);
+  // The cage is the only source of user traffic; nothing may run during a
+  // switch. The gateway boots only because the config lives on its disk.
+  const states = await vmStates();
+  if (states.get(rec.name) === 'running' || states.get(rec.gatewayName) === 'running') {
+    throw new AgentError(ERR.busy, 'power off the cage and the gateway before switching node');
   }
 
-  step(ctx, 'switching', `writing config for ${node.name}`);
+  step(ctx, 'starting', 'booting gateway for node switch');
   let backup: string | null = null;
   try {
+    await vmPower('gateway', 'start');
+    step(ctx, 'switching', `writing config for ${node.name}`);
     backup = await installConfig(renderMihomoConfig(node));
-  } catch (err) {
-    // Nothing was installed, but the core may have been left untouched: keep
-    // the cage down and report a rollback rather than pretending we switched.
-    step(ctx, 'rollback', (err as Error).message, false);
-    throw err instanceof AgentError ? err : new AgentError(ERR.generic, (err as Error).message);
-  }
 
-  try {
     step(ctx, 'verifying', 'restarting mihomo and testing node delay');
     await gwSudoOk('systemctl restart mihomo', { timeoutMs: 60_000 });
     const delay = await delayTest(node.name);
     ctx.log(`proxy: ${node.name} delay ${delay}ms`);
 
-    step(ctx, 'starting', 'starting cage');
-    await startInstance(rec.id);
-
-    const check = await runCheck(rec, false, ctx);
-    if (!check.ok) {
-      const failures = check.items.filter((i) => !i.ok).map((i) => `${i.name}: ${i.detail}`);
-      throw new AgentError(ERR.generic, `post-switch check failed (${failures.join('; ')})`);
-    }
+    await vmPower('gateway', 'stop');
     step(ctx, 'done', `${node.name} delay ${delay}ms`, true);
   } catch (err) {
     const message = (err as Error).message;
@@ -307,10 +293,8 @@ export async function proxySet(params: ProxySetParams, ctx: Ctx): Promise<void> 
         rolledBack = false;
       }
     }
-    await stopInstance(rec.id).catch(() => undefined);
-    if (!rolledBack) {
-      await gwSudoOk('systemctl start mihomo', { timeoutMs: 60_000 }).catch(() => '');
-    }
+    // Never leave the gateway up: the switch end state is everything off.
+    await vmPower('gateway', 'stop').catch(() => undefined);
     step(ctx, rolledBack ? 'rollback' : 'offline', message, false);
     throw new AgentError(ERR.generic, `proxy switch failed: ${message}`);
   }

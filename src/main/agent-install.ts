@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import type { ClientChannel, SFTPWrapper } from 'ssh2';
+import type { SFTPWrapper } from 'ssh2';
 import type { HostStatus } from '../shared/rpc';
-import type { TargetConnection } from './ssh';
+import type { ExecChannel, TargetConnection } from './ssh';
 import { shq } from './ssh';
 import { AgentRpc } from './rpc';
 
@@ -182,7 +182,7 @@ export async function ensureAgent(conn: TargetConnection): Promise<{ agentPath: 
 
 /** Spawn `agent.cjs rpc` once and confirm host.status answers. */
 async function verify(conn: TargetConnection, agentPath: string): Promise<HostStatus> {
-  let channel: ClientChannel;
+  let channel: ExecChannel;
   try {
     channel = await conn.exec(`node ${shq(agentPath)} rpc`);
   } catch (err) {

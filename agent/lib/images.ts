@@ -1,12 +1,9 @@
-/** Disk images available to the cage, plus a download that the UI can drive. */
-import { createWriteStream } from 'node:fs';
-import { stat, unlink } from 'node:fs/promises';
+/** Disk images available to the cage, plus install of an uploaded temp file. */
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
-import { Readable } from 'node:stream';
-import type { ImageInfo } from '../../src/shared/rpc';
+import type { ImageInfo, ImageInstallParams } from '../../src/shared/rpc';
 import { sudoOk } from './proc';
-import { AgentError, ERR, type Ctx } from './types';
+import { AgentError, ERR } from './types';
 import { IMAGE_DIR } from './util';
 
 const IMAGE_EXT = /\.(qcow2|img|iso)$/i;
@@ -41,44 +38,16 @@ function safeName(raw: unknown): string {
   return name;
 }
 
-/**
- * Download into IMAGE_DIR. Written as .part first so a half file can never be
- * mistaken for a bootable image, and progress goes out as events for the UI.
- */
-export async function downloadImage(url: unknown, nameRaw: unknown, ctx: Ctx): Promise<ImageInfo> {
-  const href = typeof url === 'string' ? url.trim() : '';
-  if (!/^https?:\/\//i.test(href)) throw new AgentError(ERR.params, 'url must be http(s)');
-  const name = safeName(nameRaw);
-  const target = path.join(IMAGE_DIR, name);
-  // The image dir is root-owned; stream to /tmp as the login user, then mv.
-  const part = path.join('/tmp', `${name}.part`);
-
-  const res = await fetch(href, { redirect: 'follow' });
-  if (!res.ok || !res.body) throw new AgentError(ERR.generic, `download failed: HTTP ${res.status}`);
-  const total = Number(res.headers.get('content-length') ?? 0);
-
-  const sink = createWriteStream(part);
-  let written = 0;
-  let lastEmit = 0;
-  const body = Readable.fromWeb(res.body as never);
-  body.on('data', (chunk: Buffer) => {
-    written += chunk.length;
-    const now = Date.now();
-    if (now - lastEmit < 500) return;
-    lastEmit = now;
-    ctx.emit({ event: 'image.progress', data: { name, written, total } });
-  });
-
-  try {
-    await pipeline(body, sink);
-    if (total > 0 && written !== total) throw new AgentError(ERR.generic, `short download: ${written}/${total}`);
-    await sudoOk('mv', [part, target], { timeoutMs: 60_000 });
-  } catch (err) {
-    await unlink(part).catch(() => undefined);
-    throw err instanceof AgentError ? err : new AgentError(ERR.generic, (err as Error).message);
+/** Move a file the UI already uploaded to /tmp into IMAGE_DIR. */
+export async function installImage(params: ImageInstallParams): Promise<ImageInfo> {
+  const name = safeName(params?.name);
+  const tmpPath = typeof params?.tmpPath === 'string' ? params.tmpPath.trim() : '';
+  if (!path.isAbsolute(tmpPath)) {
+    throw new AgentError(ERR.params, 'tmpPath must be an absolute path');
   }
-
-  const st = await stat(target);
-  ctx.emit({ event: 'image.progress', data: { name, written: st.size, total: st.size } });
+  const st = await stat(tmpPath).catch(() => null);
+  if (!st?.isFile()) throw new AgentError(ERR.params, `tmpPath not found: ${tmpPath}`);
+  const target = path.join(IMAGE_DIR, name);
+  await sudoOk('mv', [tmpPath, target], { timeoutMs: 60_000 });
   return { name, path: target, sizeBytes: st.size, modified: st.mtimeMs };
 }

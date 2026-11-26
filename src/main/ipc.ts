@@ -21,6 +21,9 @@ import type { HostTarget, TerminalHandle, TerminalOptions } from '../shared/ipc'
 import { IPC } from '../shared/ipc';
 import { connectTarget, shq } from './ssh';
 import type { TargetConnection } from './ssh';
+import { connectLocal } from './local';
+import { getAppProxy, setAppProxy } from './app-proxy';
+import { downloadAndInstallImage } from './download';
 import { AgentRpc } from './rpc';
 import { ensureAgent } from './agent-install';
 import { TerminalManager } from './terminal';
@@ -41,10 +44,11 @@ const RPC_METHODS: Record<RpcMethod, true> = {
   'host.status': true,
   'instance.start': true,
   'instance.stop': true,
+  'instance.delete': true,
   'vm.power': true,
   'gateway.restartCore': true,
   'images.list': true,
-  'images.download': true,
+  'images.install': true,
   'provision.plan': true,
   'provision.run': true,
   'proxy.get': true,
@@ -111,6 +115,7 @@ function asTarget(value: unknown): HostTarget {
   return {
     id: asString(t.id, 'target id'),
     label: asString(t.label, 'target label'),
+    ...(t.kind === 'local' ? { kind: 'local' as const } : {}),
     host: asString(t.host, 'target host'),
     port: asInteger(t.port, 'target port', 1, 65535),
     username: asString(t.username, 'target username'),
@@ -158,7 +163,7 @@ function rpcMethod(value: unknown): RpcMethod {
 async function reconnectSession(): Promise<Session> {
   if (!lastTarget) throw new Error('not connected to a host');
   teardown();
-  const conn = await connectTarget(lastTarget);
+  const conn = lastTarget.kind === 'local' ? await connectLocal() : await connectTarget(lastTarget);
   const { agentPath } = await ensureAgent(conn);
   const channel = await conn.exec(`node ${shq(agentPath)} rpc`);
   const rpc = new AgentRpc(channel);
@@ -196,7 +201,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     const target = asTarget(raw);
     lastTarget = target;
     teardown();
-    const conn = await connectTarget(target);
+    const conn = target.kind === 'local' ? await connectLocal() : await connectTarget(target);
     try {
       const { agentPath, status } = await ensureAgent(conn);
       const channel = await conn.exec(`node ${shq(agentPath)} rpc`);
@@ -251,10 +256,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.proxySet, async (_event, raw: unknown): Promise<void> => {
     if (!raw || typeof raw !== 'object') throw new Error('proxy params must be an object');
     const p = raw as Partial<ProxySetParams>;
+    const node = asNode(p.node);
     await requireSession().rpc.request('proxy.set', {
-      node: asNode(p.node),
+      node,
       confirmName: asString(p.confirmName, 'confirmName'),
     }, 0);
+    // remember the node so the editor prefills next time; the agent refuses
+    // switches while anything runs, so this only ever stores an applied node
+    const target = lastTarget;
+    if (target) {
+      const store = await loadStore();
+      await saveStore({
+        ...store,
+        targets: store.targets.map((t) => (t.id === target.id ? { ...t, node } : t)),
+      });
+    }
   });
 
   ipcMain.handle(IPC.dnsSet, async (_event, mode: unknown): Promise<void> => {
@@ -327,6 +343,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     await requireSession().rpc.request('instance.stop', { id: asString(id, 'instance id') }, 180_000);
   });
 
+  ipcMain.handle(IPC.instanceDelete, async (_event, id: unknown, removeDisks: unknown): Promise<void> => {
+    // shutdown + undefine (+ optional disk delete) is slower than a plain stop
+    await requireSession().rpc.request('instance.delete', {
+      id: asString(id, 'instance id'),
+      removeDisks: removeDisks === true,
+    }, 180_000);
+  });
+
   ipcMain.handle(IPC.vmPower, async (_event, target: unknown, action: unknown): Promise<void> => {
     if ((target !== 'cage' && target !== 'gateway') || (action !== 'start' && action !== 'stop')) {
       throw new Error('vm power needs target cage|gateway and action start|stop');
@@ -344,8 +368,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle(IPC.imageDownload, (_event, url: unknown, name: unknown): Promise<ImageInfo> => {
     if (typeof url !== 'string' || typeof name !== 'string') throw new Error('url and name are required');
-    return requireSession().rpc.request<ImageInfo>('images.download', { url, name }, 0);
+    const current = requireSession();
+    return downloadAndInstallImage(current.conn, current.rpc, url, name, (progress) =>
+      send(IPC.event, 'image.progress', progress),
+    );
   });
+
+  ipcMain.handle(IPC.appProxyGet, () => getAppProxy());
+  ipcMain.handle(IPC.appProxySet, (_event, raw: unknown) => setAppProxy(raw));
 
   ipcMain.handle(IPC.instances, async (): Promise<Instance[]> => {
     const status = await requireSession().rpc.request<HostStatus>('host.status');

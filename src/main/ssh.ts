@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import type { Client, ClientChannel, ConnectConfig, SFTPWrapper } from 'ssh2';
 import type * as Ssh2 from 'ssh2';
+import type { Duplex } from 'node:stream';
 import type { HostTarget } from '../shared/ipc';
 
 // ssh2 pulls in the native cpu-features addon; load it at runtime instead of
@@ -14,8 +15,13 @@ export function shq(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+export interface ExecChannel extends Duplex {
+  /** stderr from the remote command; always present so callers can subscribe */
+  stderr: NodeJS.ReadableStream;
+}
+
 export interface TargetConnection {
-  exec(cmd: string): Promise<ClientChannel>;
+  exec(cmd: string): Promise<ExecChannel>;
   sftp(): Promise<SFTPWrapper>;
   close(): void;
 }
@@ -102,11 +108,12 @@ export async function connectTarget(target: HostTarget): Promise<TargetConnectio
   if (!final) throw new Error('SSH chain is empty');
 
   return {
-    exec(cmd: string): Promise<ClientChannel> {
+    exec(cmd: string): Promise<ExecChannel> {
       return new Promise((resolve, reject) => {
         final.exec(cmd, (err, channel) => {
           if (err) reject(new Error(`Remote exec failed: ${err.message}`));
-          else resolve(channel);
+          // ssh2 types stderr as optional; the transport contract guarantees it
+          else resolve(channel as ExecChannel);
         });
       });
     },

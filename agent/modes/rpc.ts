@@ -10,6 +10,7 @@ import type {
 } from '../../src/shared/rpc';
 import { runCheck } from '../lib/check';
 import {
+  deleteInstance,
   findInstance,
   getDnsMode,
   getProxyState,
@@ -22,7 +23,7 @@ import {
 import { guestExec } from '../lib/ssh';
 import { guestBootstrap, provisionPlan, provisionRun } from '../lib/provision';
 import { dnsSet, proxySet, restartCore } from '../lib/proxy';
-import { downloadImage, listImages } from '../lib/images';
+import { installImage, listImages } from '../lib/images';
 import { AgentError, ERR, type Ctx } from '../lib/types';
 import { tail } from '../lib/util';
 
@@ -37,6 +38,11 @@ const HANDLERS: Record<RpcMethod, Handler> = {
   'host.status': () => getStatus(),
   'instance.start': (params) => startInstance(instanceId(params)),
   'instance.stop': (params) => stopInstance(instanceId(params)),
+  'instance.delete': (params) => {
+    const p = params as { id?: unknown; removeDisks?: unknown } | null;
+    if (typeof p?.id !== 'string') throw new AgentError(ERR.params, 'instance id is required');
+    return deleteInstance({ id: p.id, removeDisks: p.removeDisks === true });
+  },
   'vm.power': (params) => {
     const p = params as { target?: unknown; action?: unknown } | null;
     if ((p?.target !== 'cage' && p?.target !== 'gateway') || (p?.action !== 'start' && p?.action !== 'stop')) {
@@ -50,9 +56,12 @@ const HANDLERS: Record<RpcMethod, Handler> = {
   'proxy.set': (params, ctx) => proxySet(params as ProxySetParams, ctx),
   'gateway.restartCore': () => restartCore(),
   'images.list': () => listImages(),
-  'images.download': (params, ctx) => {
-    const p = params as { url?: unknown; name?: unknown } | null;
-    return downloadImage(p?.url, p?.name, ctx);
+  'images.install': (params) => {
+    const p = params as { tmpPath?: unknown; name?: unknown } | null;
+    if (typeof p?.tmpPath !== 'string' || typeof p.name !== 'string') {
+      throw new AgentError(ERR.params, 'tmpPath and name are required');
+    }
+    return installImage({ tmpPath: p.tmpPath, name: p.name });
   },
   'dns.get': () => getDnsMode(),
   'dns.set': (params) => dnsSet(params),
@@ -171,7 +180,7 @@ const MUTATING: Partial<Record<RpcMethod, true>> = {
   'dns.set': true,
   'vm.power': true,
   'gateway.restartCore': true,
-  'images.download': true,
+  'images.install': true,
 };
 let busy: RpcMethod | null = null;
 

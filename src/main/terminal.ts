@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { ClientChannel } from 'ssh2';
 import type { TerminalHandle, TerminalOptions } from '../shared/ipc';
-import type { TargetConnection } from './ssh';
+import type { ExecChannel, TargetConnection } from './ssh';
 import { shq } from './ssh';
 
 interface Terminal {
-  channel: ClientChannel;
+  channel: ExecChannel;
 }
 
 /**

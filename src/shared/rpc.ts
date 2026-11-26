@@ -30,10 +30,11 @@ export type RpcMethod =
   | 'host.status'
   | 'instance.start'
   | 'instance.stop'
+  | 'instance.delete'
   | 'vm.power'
   | 'gateway.restartCore'
   | 'images.list'
-  | 'images.download'
+  | 'images.install'
   | 'provision.plan'
   | 'provision.run'
   | 'proxy.get'
@@ -160,9 +161,16 @@ export interface ImageInfo {
   modified: number;
 }
 
-export interface ImageDownloadParams {
-  url: string;
+export interface ImageInstallParams {
+  /** file already uploaded to the host, e.g. /tmp/noble.qcow2.part */
+  tmpPath: string;
   name: string;
+}
+
+export interface InstanceDeleteParams {
+  id: string;
+  /** also delete the instance's qcow2 overlays (base images are never touched) */
+  removeDisks?: boolean;
 }
 
 export interface VmPowerParams {

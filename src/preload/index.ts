@@ -37,11 +37,15 @@ const api: AppApi = {
 
   instanceStart: (id) => ipcRenderer.invoke(IPC.instanceStart, id),
   instanceStop: (id) => ipcRenderer.invoke(IPC.instanceStop, id),
+  instanceDelete: (id, removeDisks) => ipcRenderer.invoke(IPC.instanceDelete, id, removeDisks),
   vmPower: (target, action) => ipcRenderer.invoke(IPC.vmPower, target, action),
   gatewayRestartCore: () => ipcRenderer.invoke(IPC.gatewayRestartCore),
   imagesList: () => ipcRenderer.invoke(IPC.imagesList),
   imageDownload: (url, name) => ipcRenderer.invoke(IPC.imageDownload, url, name),
   instances: () => ipcRenderer.invoke(IPC.instances),
+
+  appProxyGet: () => ipcRenderer.invoke(IPC.appProxyGet),
+  appProxySet: (config) => ipcRenderer.invoke(IPC.appProxySet, config),
 
   terminalOpen: (opts) => ipcRenderer.invoke(IPC.terminalOpen, opts),
   terminalWrite: (id, data) => {

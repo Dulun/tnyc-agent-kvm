@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { disposeIpc, registerIpc } from './ipc';
+import { initAppProxy } from './app-proxy';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -33,7 +34,12 @@ function createWindow(): void {
   void window.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
+  // a saved manual proxy must be active before the first download; a broken
+  // saved value must not stop the app from starting
+  await initAppProxy().catch((err: unknown) => {
+    console.error(`app proxy: ${err instanceof Error ? err.message : String(err)}`);
+  });
   // session lives here, not on the window, so renderer reloads keep it alive
   registerIpc(() => mainWindow);
   createWindow();

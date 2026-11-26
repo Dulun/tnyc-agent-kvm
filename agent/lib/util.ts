@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { AgentError, ERR } from './types';
 
-export const AGENT_VERSION = '0.1.0';
+export const AGENT_VERSION = '0.2.0';
 
 export const DATA_DIR = path.join(homedir(), '.local/share/tnyc-agent-kvm');
 export const INSTANCES_FILE = path.join(DATA_DIR, 'instances.json');
@@ -14,7 +14,6 @@ export const SEED_DIR = path.join(DATA_DIR, 'seed');
 
 export const IMAGE_DIR = '/var/lib/libvirt/images';
 export const NETWORK_NAME = 'cage-lan';
-export const RELAY_SERVICE = 'gateway-kvm-host';
 
 /**
  * Locate a file shipped with the agent. Candidates: an explicit asset root,

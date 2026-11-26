@@ -1,6 +1,6 @@
 import '@xterm/xterm/css/xterm.css';
 import type { AppApi, HostTarget } from '../shared/ipc';
-import type { HostStatus, ImageInfo } from '../shared/rpc';
+import type { HostStatus, ImageInfo, NodeConfig } from '../shared/rpc';
 import { renderWizard } from './wizard';
 import { renderFooter } from './status';
 import { TerminalTabs } from './terminal';
@@ -83,9 +83,11 @@ function loadTarget(): HostTarget | null {
       port: typeof stored.port === 'number' ? stored.port : 22,
       username,
     };
+    if (stored.kind === 'local' || stored.kind === 'ssh') target.kind = stored.kind;
     if (typeof stored.keyPath === 'string') target.keyPath = stored.keyPath;
     const jump = readJump(stored.jump);
     if (jump) target.jump = jump;
+    if (stored.node && typeof stored.node === 'object') target.node = stored.node as NodeConfig;
     return target;
   } catch {
     return null;
@@ -481,6 +483,7 @@ function renderWorkbench(): void {
           <span class="wb-row-text"><b>隔离环境</b><small>${running ? '运行中' : '已停止'}</small></span>
           <button type="button" class="ghost" id="wb-cage-on" ${powerBusy || running ? 'disabled' : ''}>开机</button>
           <button type="button" class="ghost" id="wb-cage-off" ${powerBusy || !running ? 'disabled' : ''}>关机</button>
+          <button type="button" class="ghost" id="wb-delete" ${powerBusy || deleteBusy || !instance ? 'disabled' : ''}>${deleteBusy ? '删除中…' : '删除实例'}</button>
         </div>
         <div class="wb-row">
           <span class="dot ${gatewayRunning ? 'ok' : 'bad'}"></span>
@@ -498,7 +501,7 @@ function renderWorkbench(): void {
       ${!instance ? `<div class="card wb-card" id="wb-create">
         <div class="wb-row"><span class="wb-icon">${icon('shield', 18)}</span><span class="wb-row-text"><b>创建环境</b><small>KVM 尚未创建</small></span></div>
         <div class="wb-row"><select id="cr-image-sel">${imageOptions}</select><button type="button" class="ghost" id="cr-image-refresh">刷新</button></div>
-        <div class="wb-row"><input id="cr-image" placeholder="或直接填镜像路径" value="${esc(lastImagePath)}"></div>
+        <div class="wb-row"><input id="cr-image" placeholder="自定义镜像路径（上面没选时使用）" value="${esc(lastImagePath)}"></div>
         <div class="wb-row"><input id="cr-dl-url" placeholder="镜像下载地址 https://…/ubuntu.qcow2"><input id="cr-dl-name" placeholder="保存为 ubuntu.qcow2"></div>
         <div class="wb-row"><span class="wb-row-text"><small id="cr-dl-state">${esc(downloadState)}</small></span><button type="button" class="ghost" id="cr-dl-go" ${downloadBusy ? 'disabled' : ''}>下载镜像</button></div>
         <div class="wb-row"><input id="cr-vcpus" type="number" min="1" value="4"><input id="cr-mem" type="number" min="1024" step="1024" value="8192"></div>
@@ -522,13 +525,9 @@ function renderWorkbench(): void {
   viewEls.workbench.querySelector('#wb-gw-on')?.addEventListener('click', () => void runVmPower('gateway', 'start'));
   viewEls.workbench.querySelector('#wb-gw-off')?.addEventListener('click', () => void runVmPower('gateway', 'stop'));
   viewEls.workbench.querySelector('#wb-gw-core')?.addEventListener('click', () => void runCoreRestart());
+  viewEls.workbench.querySelector('#wb-delete')?.addEventListener('click', () => void runDelete());
   viewEls.workbench.querySelector('#cr-image-refresh')?.addEventListener('click', () => void loadImages());
   viewEls.workbench.querySelector('#cr-dl-go')?.addEventListener('click', () => void runImageDownload());
-  viewEls.workbench.querySelector('#cr-image-sel')?.addEventListener('change', (event) => {
-    const sel = event.target as HTMLSelectElement;
-    const input = document.querySelector('#cr-image') as HTMLInputElement | null;
-    if (input && sel.value) input.value = sel.value;
-  });
   viewEls.workbench.querySelector('#cr-go')?.addEventListener('click', () => void runCreate());
 }
 
@@ -599,9 +598,11 @@ async function loadImages(): Promise<void> {
   if (!api) return;
   try {
     imageList = await api.imagesList();
-    imageOptions = imageList.length
-      ? imageList.map((i) => `<option value="${esc(i.path)}">${esc(i.name)} · ${(i.sizeBytes / 1e9).toFixed(1)} GB</option>`).join('')
-      : '<option value="">（镜像目录为空）</option>';
+    imageOptions = `<option value="">（从列表选择镜像）</option>${
+      imageList.length
+        ? imageList.map((i) => `<option value="${esc(i.path)}">${esc(i.name)} · ${(i.sizeBytes / 1e9).toFixed(1)} GB</option>`).join('')
+        : '<option value="" disabled>（镜像目录为空）</option>'
+    }`;
   } catch (failure) {
     imageOptions = `<option value="">读取失败：${esc(messageOf(failure))}</option>`;
   }
@@ -635,7 +636,8 @@ let lastImagePath = '';
 async function runCreate(): Promise<void> {
   if (!api || provisionBusy) return;
   const q = (id: string): string => (document.querySelector(id) as HTMLInputElement | null)?.value.trim() ?? '';
-  const imagePath = q('#cr-image');
+  const picked = (document.querySelector('#cr-image-sel') as HTMLSelectElement | null)?.value ?? '';
+  const imagePath = picked || q('#cr-image');
   const server = q('#cr-server');
   const port = Number(q('#cr-port') || '443');
   const password = q('#cr-password');
@@ -717,17 +719,50 @@ async function runInstance(action: 'start' | 'stop'): Promise<void> {
   }
 }
 
+let deleteBusy = false;
+
+async function runDelete(): Promise<void> {
+  if (!api || !status || deleteBusy) return;
+  const instance = status.instances[0];
+  if (!instance) return;
+  const typed = await askText(`删除实例：输入实例名称「${instance.name}」以确认`);
+  if (typed === null) return;
+  if (typed !== instance.name) {
+    errorMessage = '实例名称不匹配，已取消删除';
+    paint();
+    return;
+  }
+  const confirmed = await askConfirm(
+    '删除实例',
+    `「${instance.name}」的 libvirt 定义将被删除，删除后无法恢复。`,
+    '连同磁盘删除（同时删除该实例的 qcow2 差分盘，基础镜像不动）',
+  );
+  if (!confirmed) return;
+  deleteBusy = true;
+  errorMessage = null;
+  paint();
+  try {
+    await api.instanceDelete(instance.id, confirmed.checked);
+  } catch (failure) {
+    errorMessage = messageOf(failure);
+  } finally {
+    deleteBusy = false;
+    await refresh();
+  }
+}
+
 /* ---------- lifecycle ---------- */
 
 
 /** Async confirm; window.confirm blocks the renderer and cannot be scripted. */
-async function askConfirm(title: string, message: string): Promise<boolean> {
+async function askConfirm(title: string, message: string, checkbox?: string): Promise<false | { checked: boolean }> {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal">
       <h2></h2>
       <p class="modal-sub"></p>
+      <label class="radio-row" id="ok-check" hidden><input type="checkbox" id="ok-flag" /><span class="radio-body"><b></b></span></label>
       <div class="modal-actions"><span></span>
         <span class="modal-buttons">
           <button type="button" class="ghost" id="ok-cancel">取消</button>
@@ -739,19 +774,27 @@ async function askConfirm(title: string, message: string): Promise<boolean> {
   const p = overlay.querySelector('.modal-sub');
   if (h) h.textContent = title;
   if (p) p.textContent = message;
+  const checkBox = overlay.querySelector<HTMLElement>('#ok-check');
+  const checkText = overlay.querySelector<HTMLElement>('#ok-check b');
+  const flag = overlay.querySelector<HTMLInputElement>('#ok-flag');
+  if (checkbox && checkBox && checkText) {
+    checkBox.hidden = false;
+    checkText.textContent = checkbox;
+  }
   document.body.append(overlay);
-  return new Promise<boolean>((resolve) => {
-    const finish = (value: boolean): void => {
-      overlay.remove();
-      resolve(value);
-    };
-    overlay.querySelector('#ok-yes')?.addEventListener('click', () => finish(true));
-    overlay.querySelector('#ok-cancel')?.addEventListener('click', () => finish(false));
-    overlay.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') finish(false);
-      if (event.key === 'Enter') finish(true);
-    });
+  const { promise, resolve } = Promise.withResolvers<false | { checked: boolean }>();
+  const checked = (): { checked: boolean } => ({ checked: flag?.checked ?? false });
+  const finish = (value: false | { checked: boolean }): void => {
+    overlay.remove();
+    resolve(value);
+  };
+  overlay.querySelector('#ok-yes')?.addEventListener('click', () => finish(checked()));
+  overlay.querySelector('#ok-cancel')?.addEventListener('click', () => finish(false));
+  overlay.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') finish(false);
+    if (event.key === 'Enter') finish(checked());
   });
+  return promise;
 }
 
 /** Electron has no window.prompt; this is the same thing without native dialogs. */
@@ -911,9 +954,12 @@ function handleEvent(event: string, data: unknown): void {
     return;
   }
   if (event === 'image.progress') {
-    const d = data as { written?: number; total?: number } | null;
-    const mb = (n?: number) => ((n ?? 0) / 1e6).toFixed(0);
-    downloadState = d?.total ? `${mb(d.written)} / ${mb(d.total)} MB` : `${mb(d?.written)} MB`;
+    const d = data as { name?: string; written?: number; total?: number } | null;
+    const written = d?.written ?? 0;
+    const total = d?.total ?? 0;
+    const mb = (n: number): string => (n / 1e6).toFixed(0);
+    const pct = total > 0 ? `${Math.floor((written / total) * 100)}% · ` : '';
+    downloadState = `${d?.name ? `${d.name} ` : ''}${pct}${mb(written)}${total > 0 ? ` / ${mb(total)}` : ''} MB`;
     const el = document.querySelector('#cr-dl-state');
     if (el) el.textContent = downloadState;
     return;

@@ -4,14 +4,13 @@ import { readFile, stat, statfs } from 'node:fs/promises';
 import { cpus, totalmem } from 'node:os';
 import path from 'node:path';
 import type { GuestExecResult, ProvisionPlan } from '../../src/shared/rpc';
-import { hasPasswordlessSudo, runOk, sudo, sudoOk, sudoScript, virsh, which } from './proc';
+import { hasPasswordlessSudo, runOk, sudo, sudoOk, virsh, which } from './proc';
 import { GATEWAY, gwOk, gwSudo, gwSudoScript, guestExec, waitForGateway, waitForGuestAgent } from './ssh';
 import { findInstance, readInstanceRecords, writeInstanceRecords, instanceList } from './status';
 import { renderMihomoConfig, validateNode } from './proxy';
 import { runCheck } from './check';
 import { AgentError, ERR, type Ctx, type InstanceRecord } from './types';
 import {
-  DATA_DIR,
   IMAGE_DIR,
   NETWORK_NAME,
   SEED_DIR,
@@ -27,7 +26,6 @@ const GW_MAC_WAN = '52:54:00:aa:22:01';
 const GW_MAC_LAN = '52:54:00:aa:22:02';
 const CAGE_MAC = '52:54:00:aa:22:11';
 const GW_ULA = 'fd00:3c6a:484c:c7ee:122::1';
-const GW_PREFIX = 'fd00:3c6a:484c:c7ee:122::/64';
 const CAGE_IP = '10.99.0.2';
 
 interface ProvisionParams {
@@ -122,44 +120,6 @@ export async function provisionPlan(raw: unknown): Promise<ProvisionPlan> {
     warnings,
   };
 }
-
-/** host-v6.sh, verbatim behaviour, plus a systemd unit so it survives reboots. */
-const RELAY_SCRIPT = `#!/bin/bash
-set -euo pipefail
-PREFIX=${GW_PREFIX}
-GW6=${GW_ULA}
-WAN_IF=\${WAN_IF:-$(ip route show default | awk '{print $5; exit}')}
-sysctl -qw net.ipv6.conf.all.forwarding=1
-sysctl -qw net.ipv6.conf.virbr0.disable_ipv6=0
-ip -6 addr replace "$GW6/64" dev virbr0
-ip6tables -C FORWARD -i virbr0 -o "$WAN_IF" -j ACCEPT 2>/dev/null ||
-  ip6tables -I FORWARD 1 -i virbr0 -o "$WAN_IF" -j ACCEPT
-ip6tables -C FORWARD -i "$WAN_IF" -o virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null ||
-  ip6tables -I FORWARD 1 -i "$WAN_IF" -o virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-ip6tables -t nat -C POSTROUTING -s "$PREFIX" ! -d fd00::/8 -o "$WAN_IF" -j MASQUERADE 2>/dev/null ||
-  ip6tables -t nat -A POSTROUTING -s "$PREFIX" ! -d fd00::/8 -o "$WAN_IF" -j MASQUERADE
-GW4=\${GW4:-$(ip route show default | awk "NR==1{print \\$3}")}
-GW6_WAN=$(ip -6 route show default | awk "/default via/{print \\$3; exit}")
-ip rule add iif virbr0 lookup 1234 pref 5100 2>/dev/null || true
-ip route replace default via "$GW4" dev "$WAN_IF" table 1234
-ip -6 rule add iif virbr0 lookup 1235 pref 5100 2>/dev/null || true
-ip -6 route replace default via "$GW6_WAN" dev "$WAN_IF" table 1235
-echo "host v6 relay: $PREFIX -> $WAN_IF"
-`;
-
-const RELAY_UNIT = `[Unit]
-Description=tnyc host IPv6 relay for cage-lan
-After=network-online.target libvirtd.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/local/lib/tnyc-host-relay.sh
-
-[Install]
-WantedBy=multi-user.target
-`;
 
 const GATEWAY_EGRESS_SCRIPT = `#!/usr/bin/env bash
 set -euo pipefail
@@ -311,19 +271,6 @@ async function virtInstall(args: string[]): Promise<void> {
 }
 
 
-/** Copy a local file into a privileged path on the host. */
-async function installHostText(
-  localName: string,
-  remotePath: string,
-  content: string,
-  mode: string,
-): Promise<void> {
-  const tmp = path.join(DATA_DIR, localName);
-  await writeTextAtomic(tmp, content);
-  await sudoOk('install', ['-d', '-m', '755', path.posix.dirname(remotePath)], { timeoutMs: 30_000 });
-  await sudoOk('install', ['-m', mode, tmp, remotePath], { timeoutMs: 30_000 });
-}
-
 async function gwWrite(remotePath: string, content: string): Promise<void> {
   const write = await gwSudo(`umask 077; cat > ${remotePath}`, { input: content, timeoutMs: 60_000 });
   if (write.code !== 0) {
@@ -351,6 +298,76 @@ async function ensureNetwork(): Promise<void> {
   await virsh(['net-define', findAsset('net/cage-lan.xml')], { timeoutMs: 30_000 });
   await virsh(['net-start', NETWORK_NAME], { timeoutMs: 30_000 });
   await virsh(['net-autostart', NETWORK_NAME], { timeoutMs: 30_000 });
+}
+
+/**
+ * Declare IPv6 on libvirt's default network so libvirt itself assigns the ULA
+ * to virbr0, enables IPv6 forwarding and generates the NAT66 masquerade.
+ * Transforms the live dumpxml; assets/net/default.xml is only the fallback.
+ */
+async function ensureDefaultNetworkV6(): Promise<void> {
+  const dump = await virsh(['net-dumpxml', 'default'], { timeoutMs: 15_000 });
+  if (dump.code !== 0) {
+    throw new AgentError(
+      ERR.generic,
+      `virsh net-dumpxml default failed: ${tail(dump.stderr || dump.stdout, 4)} ` +
+        '(assets/net/default.xml is the fallback network to define)',
+    );
+  }
+  let xml = dump.stdout;
+  if (/family=['"]ipv6['"]/.test(xml) && /ipv6=['"]yes['"]/.test(xml)) return;
+
+  if (!/ipv6=['"]yes['"]/.test(xml)) {
+    const nat = /<nat\b([^>]*)>/.exec(xml);
+    if (!nat) {
+      throw new AgentError(
+        ERR.generic,
+        "libvirt default network has no <nat> forward; cannot enable IPv6 without rewriting it",
+      );
+    }
+    xml = xml.replace(nat[0], `<nat${nat[1]} ipv6='yes'>`);
+  }
+  if (!/family=['"]ipv6['"]/.test(xml)) {
+    xml = xml.replace('</network>', `  <ip family='ipv6' address='${GW_ULA}' prefix='64'/>\n</network>`);
+  }
+
+  const tmp = `/tmp/tnyc-default-net-${process.pid}.xml`;
+  await writeTextAtomic(tmp, xml);
+  const defined = await virsh(['net-define', tmp], { timeoutMs: 30_000 });
+  if (defined.code !== 0) {
+    throw new AgentError(
+      ERR.generic,
+      `virsh net-define default failed: ${tail(defined.stderr || defined.stdout, 6)}`,
+    );
+  }
+  // net-destroy also fails when the network was already inactive; net-start follows.
+  await virsh(['net-destroy', 'default'], { timeoutMs: 30_000 });
+  const started = await virsh(['net-start', 'default'], { timeoutMs: 30_000 });
+  if (started.code !== 0) {
+    throw new AgentError(
+      ERR.generic,
+      `virsh net-start default failed: ${tail(started.stderr || started.stdout, 6)}`,
+    );
+  }
+
+  let addr = '';
+  for (let attempt = 0; attempt < 10; attempt++) {
+    addr = await sudoOk('ip', ['-6', 'addr', 'show', 'virbr0'], { timeoutMs: 15_000 });
+    if (addr.includes(GW_ULA)) break;
+    await sleep(500);
+  }
+  if (!addr.includes(GW_ULA)) {
+    throw new AgentError(ERR.generic, `virbr0 has no ${GW_ULA}/64 after redefining the default network`);
+  }
+  const forwarding = (
+    await sudoOk('sysctl', ['-n', 'net.ipv6.conf.all.forwarding'], { timeoutMs: 15_000 })
+  ).trim();
+  if (forwarding !== '1') {
+    throw new AgentError(
+      ERR.generic,
+      `libvirt did not enable IPv6 forwarding (sysctl net.ipv6.conf.all.forwarding=${forwarding})`,
+    );
+  }
 }
 
 /** The gateway needs a mihomo binary; reuse one already working on this host. */
@@ -471,6 +488,7 @@ export async function provisionRun(raw: unknown, ctx: Ctx): Promise<void> {
   const cageSeed = path.join(IMAGE_DIR, `${rec.name}-seed.iso`);
 
   await step(ctx, 'network', () => ensureNetwork());
+  await step(ctx, 'network-ipv6', () => ensureDefaultNetworkV6());
 
   await step(ctx, 'images', async () => {
     const st = await stat(params.imagePath).catch(() => null);
@@ -518,19 +536,6 @@ export async function provisionRun(raw: unknown, ctx: Ctx): Promise<void> {
       await virsh(['start', GATEWAY_VM], { timeoutMs: 60_000 });
     }
     await waitForGateway();
-  });
-
-  await step(ctx, 'relay', async () => {
-    await installHostText('tnyc-host-relay.sh', '/usr/local/lib/tnyc-host-relay.sh', RELAY_SCRIPT, '755');
-    await installHostText(
-      'gateway-kvm-host.service',
-      '/etc/systemd/system/gateway-kvm-host.service',
-      RELAY_UNIT,
-      '644',
-    );
-    await sudoScript('systemctl daemon-reload; systemctl enable --now gateway-kvm-host.service', {
-      timeoutMs: 60_000,
-    });
   });
 
   await step(ctx, 'gateway-config', async () => {

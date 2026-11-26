@@ -67,6 +67,7 @@ export function mountSettings(root: HTMLElement, ctx: SettingsContext): () => vo
   const { app, target, status } = ctx;
   const instance = status.instances[0];
   const instanceName = instance?.name ?? '';
+  const kvmRunning = instance?.state === 'running' || instance?.gatewayState === 'running';
 
   const kv: [string, string][] = [
     ['主机', status.hostname],
@@ -97,7 +98,8 @@ export function mountSettings(root: HTMLElement, ctx: SettingsContext): () => vo
 
         <section class="danger-panel" id="danger" hidden>
           <h3>危险操作：更换代理节点</h3>
-          <p class="danger-warning">虚拟机将被关闭，随后以新节点重新启动。所有 tmux 会话（包括 <code>cage</code>）都会丢失，所有远端客户端会断开，需要重新连接。</p>
+          <p class="danger-warning">切换前必须先关闭 <code>cage</code> 和 <code>gateway</code>。切换期间网关会被临时启动，仅用于写入并验证节点配置，完成后自动关机；<code>cage</code> 全程保持关闭，tmux 会话在关机时已经结束。</p>
+          <p class="dns-caution" id="node-gate">切换节点需要先关闭全部 KVM（cage 和 gateway）；运行中不可切换</p>
 
           <div class="field-row">
             <label class="field"><span>节点名称</span><input id="node-name" autocomplete="off" spellcheck="false" placeholder="node-tokyo" /></label>
@@ -121,6 +123,24 @@ export function mountSettings(root: HTMLElement, ctx: SettingsContext): () => vo
           </ul>
           <div id="proxy-banner"></div>
         </section>
+      </section>
+
+      <section class="card">
+        <h2>本软件代理</h2>
+        <p class="hint">只影响本软件自己的流量（下载镜像等），不影响网关里的节点代理。</p>
+        <label class="radio-row">
+          <input type="radio" name="app-proxy-mode" value="system" />
+          <span class="radio-body"><b>系统默认</b><span class="radio-desc">不单独设置，跟随操作系统</span></span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="app-proxy-mode" value="manual" />
+          <span class="radio-body"><b>手动</b><span class="radio-desc">本软件的请求都走这个代理，下载镜像时用它加速</span></span>
+        </label>
+        <label class="field"><span>代理地址</span>
+          <input id="app-proxy-url" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:7897 或 socks5://user:pass@host:port" />
+        </label>
+        <div class="danger-actions"><button type="button" class="ghost" id="app-proxy-save">保存代理</button></div>
+        <div class="form-error" id="app-proxy-error" hidden></div>
       </section>
 
       <section class="card">
@@ -155,6 +175,12 @@ export function mountSettings(root: HTMLElement, ctx: SettingsContext): () => vo
   }
   const stepsEl = steps;
   const submitBtn = submit;
+
+  nodeName.value = target?.node?.name ?? '';
+  nodeServer.value = target?.node?.server ?? '';
+  nodePort.value = String(target?.node?.port ?? 443);
+  nodePassword.value = target?.node?.password ?? '';
+  nodeSni.value = target?.node?.sni ?? '';
 
   const dnsRadios = [...root.querySelectorAll<HTMLInputElement>('input[name="dns-mode"]')];
   const dnsError = $<HTMLDivElement>('#dns-error');
@@ -198,6 +224,58 @@ export function mountSettings(root: HTMLElement, ctx: SettingsContext): () => vo
       })();
     });
   }
+
+  const proxyRadios = [...root.querySelectorAll<HTMLInputElement>('input[name="app-proxy-mode"]')];
+  const proxyUrl = $<HTMLInputElement>('#app-proxy-url');
+  const proxyError = $<HTMLDivElement>('#app-proxy-error');
+  const proxySave = $<HTMLButtonElement>('#app-proxy-save');
+  if (proxyRadios.length !== 2 || !proxyUrl || !proxyError || !proxySave) throw new Error('app proxy markup missing');
+  let appProxyMode: 'system' | 'manual' = 'system';
+  const setProxyMode = (mode: 'system' | 'manual'): void => {
+    appProxyMode = mode;
+    for (const radio of proxyRadios) radio.checked = radio.value === mode;
+    proxyUrl.disabled = mode === 'system';
+  };
+  setProxyMode(appProxyMode);
+  void (async () => {
+    try {
+      const config = await app.appProxyGet();
+      proxyUrl.value = config.url ?? '';
+      setProxyMode(config.mode);
+    } catch (error) {
+      proxyError.textContent = error instanceof Error ? error.message : String(error);
+      proxyError.hidden = false;
+    }
+  })();
+  for (const radio of proxyRadios) {
+    radio.addEventListener('change', () => {
+      if (radio.checked && (radio.value === 'system' || radio.value === 'manual')) setProxyMode(radio.value);
+    });
+  }
+  proxySave.addEventListener('click', () => {
+    proxyError.hidden = true;
+    const url = proxyUrl.value.trim();
+    if (appProxyMode === 'manual' && !/^(https?|socks5):\/\/\S+/.test(url)) {
+      proxyError.textContent = '手动模式需要一个 http://、https:// 或 socks5:// 开头的地址';
+      proxyError.hidden = false;
+      return;
+    }
+    proxySave.disabled = true;
+    proxySave.textContent = '保存中…';
+    void (async () => {
+      try {
+        const saved = await app.appProxySet(appProxyMode === 'manual' ? { mode: 'manual', url } : { mode: 'system' });
+        proxyUrl.value = saved.url ?? '';
+        setProxyMode(saved.mode);
+      } catch (error) {
+        proxyError.textContent = error instanceof Error ? error.message : String(error);
+        proxyError.hidden = false;
+      } finally {
+        proxySave.textContent = '保存代理';
+        proxySave.disabled = false;
+      }
+    })();
+  });
 
   let busy = false;
   let finished = false;
@@ -277,7 +355,7 @@ export function mountSettings(root: HTMLElement, ctx: SettingsContext): () => vo
     const needsName = instanceName.length > 0;
     const confirmOk = needsName ? confirmInput.value === instanceName : false;
     const fieldsOk = name.length > 0 && server.length > 0 && password.length > 0 && Number.isInteger(port) && port > 0 && port < 65536;
-    const ok = !busy && !finished && confirmOk && fieldsOk;
+    const ok = !busy && !finished && !kvmRunning && confirmOk && fieldsOk;
     submitBtn.disabled = !ok;
     return ok;
   };
@@ -319,6 +397,7 @@ export function mountSettings(root: HTMLElement, ctx: SettingsContext): () => vo
 
     try {
       await app.proxySet({ node, confirmName: confirmInput.value });
+      if (ctx.target) ctx.target.node = node;
       if (!finished) {
         finished = true;
         showBanner('ok', `节点已切换到 ${node.name}。`);

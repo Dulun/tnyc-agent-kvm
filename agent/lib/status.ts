@@ -4,19 +4,21 @@ import type {
   DnsMode,
   HostStatus,
   Instance,
+  InstanceDeleteParams,
   InstanceState,
   ProxyState,
   RelayState,
 } from '../../src/shared/rpc';
 import { hostname } from 'node:os';
-import { tryRun, virsh } from './proc';
+import path from 'node:path';
+import { sudo, tryRun, virsh } from './proc';
 import { gwExec, gwSudo, waitForGateway } from './ssh';
 import { AgentError, ERR, type ExecResult, type InstanceFile, type InstanceRecord } from './types';
 import {
   AGENT_VERSION,
+  IMAGE_DIR,
   INSTANCES_FILE,
   LAST_CHECK_FILE,
-  RELAY_SERVICE,
   readJson,
   sleep,
   tail,
@@ -32,7 +34,7 @@ export async function writeInstanceRecords(instances: InstanceRecord[]): Promise
   await writeJsonAtomic(INSTANCES_FILE, { instances } satisfies InstanceFile);
 }
 
-async function vmStates(): Promise<Map<string, string>> {
+export async function vmStates(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   const res = await tryRun('virsh', ['list', '--all'], { timeoutMs: 15_000 });
   if (res.code !== 0) return map;
@@ -52,24 +54,32 @@ function mapState(raw: string | undefined): InstanceState {
   return 'unknown';
 }
 
-function countRules(res: ExecResult): number {
+function countMasquerades(res: ExecResult): number {
   if (res.code !== 0) return 0;
-  return res.stdout.split('\n').filter((line) => line.includes('virbr0')).length;
+  // libvirt's NAT66 rule carries the ULA prefix as its source; it names no bridge.
+  return res.stdout.split('\n').filter((line) => /masquerade/i.test(line) && /fd[0-9a-f]{2}:/i.test(line)).length;
 }
 
+/** IPv6 masquerade rules, via nft (native libvirt) or the iptables shim. */
+async function natMasquerades(): Promise<number> {
+  const nft = await sudo('nft', ['list', 'table', 'ip6', 'nat'], { timeoutMs: 10_000 }).catch(() => null);
+  if (nft?.code === 0) return countMasquerades(nft);
+  const ipt = await sudo('ip6tables', ['-t', 'nat', '-S', 'POSTROUTING'], { timeoutMs: 10_000 }).catch(
+    () => null,
+  );
+  return ipt ? countMasquerades(ipt) : 0;
+}
+
+/** Owned by libvirt's default network: virbr0 carries the ULA and NAT66 runs. */
 async function relayState(): Promise<RelayState> {
-  const [addr, v4Rules, v6Rules, svc] = await Promise.all([
+  const [addr, rules] = await Promise.all([
     tryRun('ip', ['-6', 'addr', 'show', 'dev', 'virbr0']),
-    tryRun('ip', ['rule', 'show']),
-    tryRun('ip', ['-6', 'rule', 'show']),
-    tryRun('systemctl', ['is-active', RELAY_SERVICE]),
+    natMasquerades(),
   ]);
   const ulaMatch =
     addr.code === 0 ? /inet6\s+(fd[0-9a-f:]+)\/\d+\s+scope\s+global/i.exec(addr.stdout) : null;
   const ula = ulaMatch?.[1] ?? null;
-  const rules = countRules(v4Rules) + countRules(v6Rules);
-  const serviceActive = svc.code === 0 && svc.stdout.trim() === 'active';
-  return { active: serviceActive || (ula !== null && rules > 0), ula, rules };
+  return { active: ula !== null && rules > 0, ula, rules };
 }
 
 const GW_STATUS = [
@@ -327,4 +337,31 @@ export async function stopInstance(id?: string): Promise<void> {
   if (!(await waitForVmState(rec.name, 'shut off', 15_000))) {
     throw new AgentError(ERR.timeout, `${rec.name} did not stop`);
   }
+}
+
+/** Shut its domains down, undefine them, optionally drop the overlays, forget the record. */
+export async function deleteInstance(params: InstanceDeleteParams): Promise<void> {
+  const rec = await findInstance(params?.id);
+  if (!rec) throw new AgentError(ERR.missing, `instance not found: ${params?.id ?? ''}`);
+
+  const states = await vmStates();
+  if (states.get(rec.name) === 'running') await stopInstance(rec.id);
+  if (states.get(rec.gatewayName) === 'running') await stopVm(rec.gatewayName);
+
+  // Domains that were never defined are already "deleted"; ignore virsh's error.
+  for (const name of [rec.gatewayName, rec.name]) {
+    await virsh(['undefine', name, '--nvram'], { timeoutMs: 60_000 });
+  }
+
+  if (params.removeDisks) {
+    // Only this instance's overlays; base cloud images and seeds are never deleted.
+    await sudo(
+      'rm',
+      ['-f', path.join(IMAGE_DIR, `${rec.gatewayName}.qcow2`), path.join(IMAGE_DIR, `${rec.name}.qcow2`)],
+      { timeoutMs: 60_000 },
+    );
+  }
+
+  const records = await readInstanceRecords();
+  await writeInstanceRecords(records.filter((r) => r.id !== rec.id));
 }

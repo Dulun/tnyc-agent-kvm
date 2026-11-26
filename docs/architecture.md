@@ -31,6 +31,13 @@ The host never has an address on `virbr-cage`. The cage only knows
 `10.99.0.1`; the host's LAN (`192.168.122.0/24`, `192.168.0.0/24`, ...) is not
 routable from it. The gateway is a normal VM on the host's `default` network.
 
+IPv6 for the gateway is part of that network's definition, not a separate
+service: `<ip family='ipv6' address='fd00:3c6a:484c:c7ee:122::1' prefix='64'/>`
+plus `<nat ipv6='yes'/>` (libvirt >= 6.5) make libvirt assign the ULA to
+`virbr0`, enable IPv6 forwarding and install the NAT66 masquerade. Provisioning
+edits the live network definition idempotently before creating any guest; there
+is no host relay script, unit, or policy table.
+
 ## Data path
 
 For a request from the cage to the internet:
@@ -54,6 +61,10 @@ The app talks only to the host, over SSH. Every remote operation is one of
 three `agent.cjs` modes started as an SSH exec channel (stdin/stdout are the
 transport; there is no RPC server):
 
+Two transports carry these channels: SSH to a remote host, or — when the app
+runs on the Linux host itself — the same `agent.cjs` spawned as a local child
+process (no sshd, no key). The wire format is identical.
+
 | Channel | Command | Payload | Used for |
 |---|---|---|---|
 | Control | `agent.cjs rpc` | one JSON object per line (`RpcRequest` / `RpcResponse` / `RpcEvent`) | host status, provisioning, proxy get/set, checks, guest exec, bootstrap |
@@ -68,6 +79,14 @@ The agent itself shells out to the gateway and the cage:
   guest credentials, and there is no host-to-cage L2 path);
 - libvirt: `virsh` and the qemu guest agent for instance lifecycle and
   out-of-band exec.
+
+## App-level proxy
+
+The app has its own outbound proxy setting (manual URL or system default). It is
+applied to the Electron session, so every request the software itself makes —
+the image download in particular — uses it. It is deliberately separate from the
+gateway's node: the cage never sees this proxy, and the proxy never sees cage
+traffic. Unset means "follow the OS".
 
 ## Why there are no listening ports
 
